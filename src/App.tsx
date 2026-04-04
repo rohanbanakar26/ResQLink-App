@@ -28,7 +28,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter basename="/ResQLink-App/" future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AppDataProvider>
           <div className="min-h-screen bg-background flex flex-col">
             <AppHeader />
