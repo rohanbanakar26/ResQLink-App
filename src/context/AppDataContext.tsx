@@ -323,33 +323,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const priorityZones = useMemo(() => buildPriorityZones([], requests), [requests]);
 
-  const createEmergency = useCallback(async (data: Record<string, any>) => {
-    const ps = calculatePriorityScore({
-      averageUrgency: getUrgencyValue(data.urgency),
-      severity: getSeverityValue(data.category),
-      totalReports: 1,
-      recentReports: 1,
-    });
-
-    const docRef = await addDoc(collection(db, "emergency_requests"), {
-      user_id: user!.uid,
-      category: data.category,
-      urgency: data.urgency,
-      description: data.description,
-      location_lat: location?.lat ?? null,
-      location_lng: location?.lng ?? null,
-      citizen_name: profile?.name || "",
-      priority_score: ps,
-      status: "Created",
-      people_affected: data.people_affected ? parseInt(data.people_affected) || null : null,
-      volunteers_needed: data.volunteers_needed || 1,
-      created_at: serverTimestamp(),
-      updated_at: serverTimestamp(),
-    });
-
-    return docRef.id;
-  }, [user, profile, location]);
-
   const autoAssignVolunteers = useCallback(async (requestId: string) => {
     const reqRef = doc(db, "emergency_requests", requestId);
     const reqSnap = await getDoc(reqRef);
@@ -449,6 +422,36 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       });
     });
   }, []);
+
+  const createEmergency = useCallback(async (data: Record<string, any>) => {
+    const ps = calculatePriorityScore({
+      averageUrgency: getUrgencyValue(data.urgency),
+      severity: getSeverityValue(data.category),
+      totalReports: 1,
+      recentReports: 1,
+    });
+
+    const docRef = await addDoc(collection(db, "emergency_requests"), {
+      user_id: user!.uid,
+      category: data.category,
+      urgency: data.urgency,
+      description: data.description,
+      location_lat: location?.lat ?? null,
+      location_lng: location?.lng ?? null,
+      citizen_name: profile?.name || "",
+      priority_score: ps,
+      status: "Created",
+      people_affected: data.people_affected ? parseInt(data.people_affected) || null : null,
+      volunteers_needed: data.volunteers_needed || 1,
+      created_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
+    });
+
+    // Trigger AI Dispatcher immediately
+    await autoAssignVolunteers(docRef.id);
+
+    return docRef.id;
+  }, [user, profile, location, autoAssignVolunteers]);
 
   const acceptRequest = useCallback(async (id: string) => {
     const ngo = ngos.find((n) => n.userId === user?.uid);
