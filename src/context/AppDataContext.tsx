@@ -300,6 +300,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setDataLoading(false);
     }, (err) => {
       console.error("NGOs listener error:", err);
+      if (err.code === "permission-denied") {
+        console.warn("NGO list access denied. Please check Firestore security rules for the 'ngos' collection.");
+      }
       setDataLoading(false);
     });
 
