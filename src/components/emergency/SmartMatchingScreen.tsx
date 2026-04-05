@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, MapPin, Users, CheckCircle2 } from "lucide-react";
+import { Loader2, MapPin, Users, CheckCircle2, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import t from "@/utils/i18n";
 
@@ -9,15 +9,10 @@ interface SmartMatchingScreenProps {
 
 const stages = [
   { key: "scanning", icon: MapPin, duration: 2000 },
+  { key: "analyzing", icon: Sparkles, duration: 2500 },
   { key: "finding", icon: Users, duration: 2500 },
   { key: "assigning", icon: CheckCircle2, duration: 1500 },
 ] as const;
-
-const stageText: Record<string, { en: string; hi: string }> = {
-  scanning: { en: "Scanning nearby area…", hi: "आस-पास का क्षेत्र स्कैन कर रहे हैं…" },
-  finding: { en: "Finding nearest volunteers…", hi: "निकटतम स्वयंसेवक खोज रहे हैं…" },
-  assigning: { en: "Assigning your response team…", hi: "आपकी प्रतिक्रिया टीम नियुक्त कर रहे हैं…" },
-};
 
 export default function SmartMatchingScreen({ onComplete }: SmartMatchingScreenProps) {
   const [stageIndex, setStageIndex] = useState(0);
@@ -52,7 +47,6 @@ export default function SmartMatchingScreen({ onComplete }: SmartMatchingScreenP
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
-      {/* Pulsing ring animation */}
       <div className="relative mb-8">
         <motion.div
           className="absolute inset-0 rounded-full bg-emergency/20"
@@ -64,16 +58,7 @@ export default function SmartMatchingScreen({ onComplete }: SmartMatchingScreenP
           style={{ width: 80, height: 80, margin: "auto", top: -10, left: -10 }}
         />
         <motion.div
-          className="absolute inset-0 rounded-full bg-emergency/10"
-          animate={{
-            scale: [1, 3.5, 1],
-            opacity: [0.4, 0, 0.4],
-          }}
-          transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut", delay: 0.3 }}
-          style={{ width: 80, height: 80, margin: "auto", top: -10, left: -10 }}
-        />
-        <motion.div
-          className="relative w-16 h-16 rounded-full bg-emergency flex items-center justify-center"
+          className="relative w-16 h-16 rounded-full bg-emergency flex items-center justify-center shadow-lg shadow-emergency/20"
           animate={done ? { scale: [1, 1.2, 1] } : { rotate: [0, 360] }}
           transition={done ? { duration: 0.5 } : { duration: 3, repeat: Infinity, ease: "linear" }}
         >
@@ -85,7 +70,6 @@ export default function SmartMatchingScreen({ onComplete }: SmartMatchingScreenP
         </motion.div>
       </div>
 
-      {/* Status text */}
       <AnimatePresence mode="wait">
         <motion.div
           key={done ? "done" : currentStage.key}
@@ -94,16 +78,24 @@ export default function SmartMatchingScreen({ onComplete }: SmartMatchingScreenP
           exit={{ opacity: 0, y: -10 }}
           className="text-center"
         >
-          <h2 className="text-xl font-bold text-foreground mb-2">
-            {done ? "Match found! ✓" : t(`matching.${currentStage.key === "scanning" ? "scanningMap" : currentStage.key === "finding" ? "findingVolunteers" : "assigningTeam"}`)}
+          <h2 className="text-xl font-bold text-foreground mb-2 flex items-center justify-center gap-2">
+            {currentStage.key === "analyzing" && <Sparkles className="w-5 h-5 text-warning animate-pulse" />}
+            {done ? "Help is on the way! ✓" : 
+              currentStage.key === "scanning" ? "Scanning Location Map..." :
+              currentStage.key === "analyzing" ? "Gemini AI Analyzing Request..." :
+              currentStage.key === "finding" ? "Finding Best Qualified Help..." :
+              "Assigning Your Response Team..."
+            }
           </h2>
-          <p className="text-sm text-muted-foreground">
-            {done ? "Redirecting to your request…" : "Please wait while we find the best help for you"}
+          <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+            {done ? "A verified team has been dispatched to your location." : 
+              currentStage.key === "analyzing" ? "Our AI is matching your needs with volunteer skills." :
+              "Please stay calm. We are coordinating the fastest response."
+            }
           </p>
         </motion.div>
       </AnimatePresence>
 
-      {/* Progress dots */}
       <div className="flex gap-3 mt-8">
         {stages.map((_, idx) => (
           <motion.div

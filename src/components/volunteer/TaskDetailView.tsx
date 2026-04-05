@@ -1,28 +1,28 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { MapPin, Clock, Users, Shield, Zap, ArrowLeft, CheckCircle2, Phone, MessageSquare, AlertTriangle, Play } from "lucide-react";
 import { useAppData } from "../../context/AppDataContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { getCategoryMeta, STATUS_COLORS, STATUS_COPY } from "../../data/system";
+import { getCategoryMeta, STATUS_COLORS } from "../../data/system";
+import OnFieldMode from "./OnFieldMode";
+import AiMissionBrief from "./AiMissionBrief";
 
 interface TaskDetailViewProps {
   requestId: string;
   onBack: () => void;
 }
 
-import OnFieldMode from "./OnFieldMode";
-
 export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProps) {
   const { requests, volunteers, currentUser, joinTask, isAvailable } = useAppData();
   const [showServiceMode, setShowServiceMode] = useState(false);
 
   const request = requests.find((r) => r.id === requestId);
-  const isJoined = request?.assignedVolunteerId === currentUser?.userId || false; // Simple check
+  const isJoined = request?.assignedVolunteerId === currentUser?.userId || false; 
   
-  // Find team status
-  const isLeader = request?.teamLeaderVolunteerId === volunteers.find(v => v.userId === currentUser?.userId)?.id;
+  const currentVol = volunteers.find(v => v.userId === currentUser?.userId);
+  const isLeader = request?.teamLeaderVolunteerId === currentVol?.id;
   
   if (!request) return null;
 
@@ -40,7 +40,6 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
       className="fixed inset-0 z-50 bg-background pb-20 overflow-y-auto"
     >
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full">
             <ArrowLeft className="w-6 h-6" />
@@ -50,7 +49,6 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
           </Badge>
         </div>
 
-        {/* Hero Section */}
         <div className="relative aspect-video rounded-3xl overflow-hidden shadow-xl border border-border/50 bg-muted/20">
           {request.photoUrl ? (
             <img src={request.photoUrl} alt="Emergency" className="w-full h-full object-cover" />
@@ -67,7 +65,6 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
           </div>
         </div>
 
-        {/* Content */}
         <div className="space-y-6">
           <div>
             <h1 className="text-2xl font-black text-foreground mb-2 flex items-center gap-2">
@@ -103,7 +100,6 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
              </Card>
           </div>
 
-          {/* Team Formation Section */}
           <div className="space-y-3">
              <h3 className="text-sm font-black text-foreground uppercase tracking-wider flex items-center gap-2">
                 <Shield className="w-4 h-4 text-success" /> Assignment Status
@@ -111,8 +107,8 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
              <Card className="bg-muted/5 border-border/50 border-dashed">
                 <CardContent className="p-6 text-center">
                    {isJoined ? (
-                      <div className="space-y-4">
-                         <div className="flex flex-col items-center">
+                      <div className="space-y-4 text-left">
+                         <div className="flex flex-col items-center text-center">
                             <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mb-3">
                                {isLeader ? (
                                   <span className="text-3xl">👑</span>
@@ -138,6 +134,15 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
                                </Button>
                             )}
                          </div>
+
+                         {/* AI Mission Briefing */}
+                         {(request as any).ai_mission_brief && (
+                            <AiMissionBrief 
+                              brief={(request as any).ai_mission_brief}
+                              reason={(request as any).ai_analysis_reason}
+                              steps={(request as any).ai_suggested_steps}
+                            />
+                         )}
                          
                          <Button 
                            onClick={() => setShowServiceMode(true)}

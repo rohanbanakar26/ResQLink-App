@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/useAuth";
 import type { GeoPoint } from "../utils/geo";
 import { haversineDistance } from "../utils/geo";
 import { buildPriorityZones, calculatePriorityScore, getUrgencyValue, getSeverityValue } from "../utils/analytics";
+import { smartAnalyzeRequest, generateMissionBrief } from "@/lib/gemini";
 
 // Types
 export interface EmergencyRequest {
@@ -359,25 +360,48 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const vQuery = query(collection(db, "volunteers"), where("available", "==", true));
     const vSnapshot = await getDocs(vQuery);
     
-    if (vSnapshot.empty) return;
+    if (vSnapshot.empty) {
+      console.warn("No available volunteers found for auto-assignment.");
+      return;
+    }
 
     const volData = await Promise.all(vSnapshot.docs.map(async d => {
       const v = d.data();
       const pSnap = await getDoc(doc(db, "profiles", v.user_id));
-      return { id: d.id, ...v, trustScore: pSnap.exists() ? (pSnap.data().trust_score || 0) : 0 };
+      return { 
+        id: d.id, 
+        ...v, 
+        name: pSnap.exists() ? (pSnap.data().full_name || "Volunteer") : "Volunteer",
+        skills: v.skills || [],
+        trustScore: pSnap.exists() ? (pSnap.data().trust_score || 0) : 0 
+      };
     }));
 
     const reqLoc = toGeo(reqData.location_lat, reqData.location_lng);
     if (!reqLoc) return;
 
-    // Rank volunteers
+    // AI ANALYSIS (Primary)
+    let aiMatch = null;
+    try {
+      aiMatch = await smartAnalyzeRequest(
+        { category: reqData.category, urgency: reqData.urgency, description: reqData.description },
+        volData
+      );
+    } catch (e) {
+      console.error("AI Smart Match failed, falling back to proximity.", e);
+    }
+
+    // Rank volunteers (AI + Proximity Hybrid)
     const ranked = volData.map((v: any) => {
       const vLoc = toGeo(v.location_lat, v.location_lng);
       const dist = haversineDistance(reqLoc, vLoc);
       const proximityScore = dist != null ? Math.max(0, 1 - dist/20) : 0;
-      const trustScore = v.trustScore / 5;
-      const totalScore = (trustScore * 0.7) + (proximityScore * 0.3);
-      return { ...v, totalScore };
+      
+      // Use AI ranking if available, otherwise trust score
+      const aiScore = aiMatch?.volunteerRankings?.[v.id] ?? (v.trustScore / 5);
+      
+      const totalScore = (aiScore * 0.7) + (proximityScore * 0.3);
+      return { ...v, totalScore, dist };
     }).sort((a: any, b: any) => b.totalScore - a.totalScore);
 
     const needed = reqData.volunteers_needed || 1;
@@ -385,6 +409,17 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (toAssign.length === 0) return;
 
     const leaderId = toAssign[0].id;
+    const leaderName = toAssign[0].name;
+
+    // Generate Mission Brief (AI)
+    let missionBrief = "";
+    if (aiMatch) {
+      missionBrief = await generateMissionBrief(
+        { category: reqData.category, description: reqData.description, citizenName: reqData.citizen_name },
+        leaderName,
+        aiMatch.reasoning
+      );
+    }
 
     // Perform updates in a batch/transaction
     await runTransaction(db, async (transaction) => {
@@ -393,13 +428,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         transaction.update(vRef, { available: false, current_task_id: requestId });
         
         const assignRef = doc(collection(db, "emergency_requests", requestId, "assignments"), v.id);
-        transaction.set(assignRef, { volunteer_id: v.id, status: "assigned", created_at: serverTimestamp() });
+        transaction.set(assignRef, { 
+          volunteer_id: v.id, 
+          status: "assigned", 
+          created_at: serverTimestamp() 
+        });
       });
 
       transaction.update(reqRef, {
         status: "Volunteer assigned",
         assigned_volunteer_id: leaderId,
+        volunteer_name: leaderName,
+        eta: toAssign[0].dist ? Math.round(toAssign[0].dist * 8) : 5, // 8 mins per km estimate
         team_leader_volunteer_id: leaderId,
+        ai_mission_brief: missionBrief,
+        ai_analysis_reason: aiMatch?.reasoning || "Matched based on proximity and trust score.",
+        ai_suggested_steps: aiMatch?.suggestedSteps || [],
+        priority_score: aiMatch?.priorityAdjusted ? (reqData.priority_score * 1.5) : reqData.priority_score,
         updated_at: serverTimestamp()
       });
     });
