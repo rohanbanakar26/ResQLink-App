@@ -11,10 +11,13 @@ import { formatDistance, haversineDistance } from "../../utils/geo";
 import t from "@/utils/i18n";
 
 export default function NgoVolunteerPanel() {
-  const { volunteers, activeRequests, location, assignVolunteer } = useAppData();
+  const { volunteers, activeRequests, location, assignVolunteer, approveVolunteer, rejectVolunteer, currentUser, ngos } = useAppData();
   const [search, setSearch] = useState("");
   const [filterAvail, setFilterAvail] = useState("all");
+  const [activeTab, setActiveTab] = useState<"team" | "requests">("team");
   const [assigningVolId, setAssigningVolId] = useState<string | null>(null);
+
+  const ngo = useMemo(() => ngos.find(n => n.userId === currentUser?.userId), [ngos, currentUser]);
 
   const unassignedRequests = useMemo(() => activeRequests.filter((r) => !r.assignedVolunteerId), [activeRequests]);
 
@@ -23,6 +26,15 @@ export default function NgoVolunteerPanel() {
       ...v,
       distanceKm: haversineDistance(location, v.location),
     }));
+
+    if (ngo) {
+      if (activeTab === "team") {
+        list = list.filter(v => v.ngoMemberships[ngo.id] === "approved");
+      } else {
+        list = list.filter(v => v.ngoMemberships[ngo.id] === "pending");
+      }
+    }
+
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((v) => v.name.toLowerCase().includes(q) || v.skills.some((s) => s.toLowerCase().includes(q)));
@@ -30,7 +42,7 @@ export default function NgoVolunteerPanel() {
     if (filterAvail === "online") list = list.filter((v) => v.available);
     if (filterAvail === "busy") list = list.filter((v) => !v.available);
     return list.sort((a, b) => (b.trustScore ?? 0) - (a.trustScore ?? 0));
-  }, [volunteers, search, filterAvail, location]);
+  }, [volunteers, search, filterAvail, location, activeTab, ngo]);
 
   const onlineCount = volunteers.filter((v) => v.available).length;
 
@@ -40,7 +52,27 @@ export default function NgoVolunteerPanel() {
         <h2 className="text-lg font-black text-foreground flex items-center gap-2">
           <Users className="w-5 h-5 text-success" /> {t("ngo.volunteers")}
         </h2>
-        <Badge variant="outline" className="text-[10px] border-success/30 text-success">{onlineCount} online</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-[10px] border-success/30 text-success">{onlineCount} online</Badge>
+        </div>
+      </div>
+
+      <div className="flex gap-2 border-b border-border/30 pb-2">
+        <button
+          onClick={() => setActiveTab("team")}
+          className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${activeTab === "team" ? "bg-success/10 text-success border border-success/20" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          Our Approved Team
+        </button>
+        <button
+          onClick={() => setActiveTab("requests")}
+          className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all relative ${activeTab === "requests" ? "bg-warning/10 text-warning border border-warning/20" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          Join Requests
+          {volunteers.filter(v => ngo && v.ngoMemberships[ngo.id] === "pending").length > 0 && (
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emergency rounded-full border-2 border-background" />
+          )}
+        </button>
       </div>
 
       {/* Search & Filters */}
@@ -105,7 +137,16 @@ export default function NgoVolunteerPanel() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      {assigningVolId === vol.id ? (
+                      {activeTab === "requests" ? (
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" className="h-7 text-[9px] font-bold text-success hover:bg-success/10" onClick={() => approveVolunteer(vol.id)}>
+                            <CheckCircle2 className="w-3 h-3 mr-1" /> Approve
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7 text-[9px] font-bold text-destructive hover:bg-destructive/10" onClick={() => rejectVolunteer(vol.id)}>
+                            <Ban className="w-3 h-3 mr-1" /> Decline
+                          </Button>
+                        </div>
+                      ) : assigningVolId === vol.id ? (
                         <Select onValueChange={(rId) => { assignVolunteer(rId, vol.id); setAssigningVolId(null); }}>
                           <SelectTrigger className="h-7 w-auto text-[9px] font-bold"><SelectValue placeholder="Pick request" /></SelectTrigger>
                           <SelectContent>

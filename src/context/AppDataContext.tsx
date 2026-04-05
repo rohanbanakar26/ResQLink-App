@@ -64,6 +64,7 @@ export interface Volunteer {
   completedTasks: number;
   distanceKm?: number | null;
   currentTaskId?: string | null;
+  ngoMemberships: Record<string, "pending" | "approved">;
 }
 
 export interface Ngo {
@@ -119,6 +120,8 @@ interface AppDataContextValue {
   isToggling: boolean;
   rejectTask: (requestId: string) => Promise<void>;
   citizenFinalize: (requestId: string, approved: boolean, feedback?: string, rating?: number) => Promise<void>;
+  approveVolunteer: (volunteerId: string) => Promise<void>;
+  rejectVolunteer: (volunteerId: string) => Promise<void>;
 }
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
@@ -259,6 +262,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           trustScore: pData.trust_score ?? 4.5,
           completedTasks: v.completed_tasks || 0,
           currentTaskId: v.current_task_id,
+          ngoMemberships: v.ngo_memberships || {},
         };
       }));
       setVolunteers(volData);
@@ -617,6 +621,31 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     await updateDoc(doc(db, "emergency_requests", requestId), { status, updated_at: serverTimestamp() });
   }, []);
 
+  const approveVolunteer = useCallback(async (vId: string) => {
+    const ngo = ngos.find(n => n.userId === user?.uid);
+    if (!ngo) return;
+    const vRef = doc(db, "volunteers", vId);
+    const vSnap = await getDoc(vRef);
+    if (vSnap.exists()) {
+      const ms = vSnap.data().ngo_memberships || {};
+      ms[ngo.id] = "approved";
+      await updateDoc(vRef, { ngo_memberships: ms });
+      await createNotification(vSnap.data().user_id, "NGO Membership Approved! 🎉", `${ngo.ngoName} has officially approved your join request.`, "info");
+    }
+  }, [user, ngos, createNotification]);
+
+  const rejectVolunteer = useCallback(async (vId: string) => {
+    const ngo = ngos.find(n => n.userId === user?.uid);
+    if (!ngo) return;
+    const vRef = doc(db, "volunteers", vId);
+    const vSnap = await getDoc(vRef);
+    if (vSnap.exists()) {
+      const ms = vSnap.data().ngo_memberships || {};
+      delete ms[ngo.id];
+      await updateDoc(vRef, { ngo_memberships: ms });
+    }
+  }, [user, ngos]);
+
   const completeRequest = useCallback(async (id: string) => {
     await updateDoc(doc(db, "emergency_requests", id), { status: "Completed", updated_at: serverTimestamp() });
   }, []);
@@ -654,11 +683,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const newUser = auth.currentUser;
     if (newUser) {
       if (metadata.role === "volunteer") {
+        const initialMemberships: Record<string, string> = {};
+        (data.ngoIds || []).forEach((id: string) => {
+          initialMemberships[id] = "pending";
+        });
+
         await setDoc(doc(db, "volunteers", newUser.uid), {
           user_id: newUser.uid,
           available: true,
           skills: data.skills || [],
-          ngo_ids: data.ngoIds || [],
+          ngo_memberships: initialMemberships,
           completed_tasks: 0,
           created_at: serverTimestamp()
         });
@@ -719,6 +753,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     completeRequest,
     rejectTask,
     citizenFinalize,
+    approveVolunteer,
+    rejectVolunteer,
     login,
     register,
     logout,

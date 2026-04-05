@@ -78,6 +78,10 @@ export default function AuthPage() {
       setError("Password must be at least 6 characters.");
       return;
     }
+    if (registerState.role === "volunteer" && (registerState.ngoIds?.length || 0) === 0) {
+      setError("Volunteers must join at least one NGO to register.");
+      return;
+    }
     setSubmitting(true);
     try {
       await register(registerState);
@@ -269,7 +273,12 @@ export default function AuthPage() {
                               🏢 {ngo.ngoName}
                             </button>
                           ))}
-                          {ngos.length === 0 && <p className="text-[10px] text-muted-foreground italic">No nearby NGOs currently active.</p>}
+                          {ngos.length === 0 && (
+                            <div className="w-full p-4 border border-dashed border-border rounded-xl text-center">
+                              <p className="text-xs text-muted-foreground">No NGOs are currently registered in the network.</p>
+                              <p className="text-[10px] text-destructive font-bold mt-1 uppercase">NGO registration required before volunteers can join</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </>
