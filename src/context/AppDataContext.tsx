@@ -268,7 +268,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setVolunteers(volData);
     }, (err) => console.error("Volunteers listener error:", err));
 
-    // 4. Listen to NGOs
+    return () => {
+      unsubscribeProfile();
+      unsubscribeRequests();
+      unsubscribeVolunteers();
+    };
+  }, [user]);
+
+  // 4. Listen to NGOs (Publicly available for registration)
+  useEffect(() => {
     const ngosRef = collection(db, "ngos");
     const unsubscribeNgos = onSnapshot(ngosRef, async (snapshot) => {
       const ngoData = await Promise.all(snapshot.docs.map(async d => {
@@ -289,20 +297,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         };
       }));
       setNgos(ngoData);
-      // Data is considered "ready" once the initial metadata listeners resolve
       setDataLoading(false);
     }, (err) => {
       console.error("NGOs listener error:", err);
       setDataLoading(false);
     });
 
-    return () => {
-      unsubscribeProfile();
-      unsubscribeRequests();
-      unsubscribeVolunteers();
-      unsubscribeNgos();
-    };
-  }, [user]);
+    return () => unsubscribeNgos();
+  }, []);
 
   const activeRequests = useMemo(() => requests.filter((r) => r.status !== "Completed"), [requests]);
 
