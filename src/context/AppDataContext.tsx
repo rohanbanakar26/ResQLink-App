@@ -324,6 +324,21 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const priorityZones = useMemo(() => buildPriorityZones([], requests), [requests]);
 
+  const createNotification = useCallback(async (userId: string, title: string, body: string, type: string = "info") => {
+    try {
+      await addDoc(collection(db, "notifications"), {
+        user_id: userId,
+        title,
+        body,
+        type,
+        read: false,
+        created_at: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Failed to create notification:", e);
+    }
+  }, []);
+
   const autoAssignVolunteers = useCallback(async (requestId: string) => {
     const reqRef = doc(db, "emergency_requests", requestId);
     const reqSnap = await getDoc(reqRef);
@@ -422,6 +437,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         updated_at: serverTimestamp()
       });
     });
+
+    // Notify Volunteers
+    await Promise.all(toAssign.map(v => 
+      createNotification(v.userId, "New Mission Assigned", `You have been dispatched to a ${reqData.category} emergency. Check your dashboard.`, "request_accepted")
+    ));
   }, []);
 
   const createEmergency = useCallback(async (data: Record<string, any>) => {
@@ -458,12 +478,18 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const ngo = ngos.find((n) => n.userId === user?.uid);
     if (!ngo) return;
 
+    const request = requests.find(r => r.id === id);
+    if (!request) return;
+
     await updateDoc(doc(db, "emergency_requests", id), {
       status: "Accepted",
       ngo_id: ngo.id,
       ngo_name: ngo.ngoName,
       updated_at: serverTimestamp()
     });
+
+    // Notify Citizen
+    await createNotification(request!.userId, "Request Accepted", `${ngo.ngoName} is now handling your emergency.`, "request_accepted");
     
     await autoAssignVolunteers(id);
   }, [user, ngos, autoAssignVolunteers]);
@@ -515,10 +541,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       const currentBadgesRef = collection(db, "profiles", userId, "badges");
       
       for (const badge of earned) {
-        await setDoc(doc(currentBadgesRef, badge.id), {
-          earned_at: serverTimestamp(),
-          badge_name: badge.name
-        });
+        const bRef = doc(currentBadgesRef, badge.id);
+        const bSnap = await getDoc(bRef);
+        if (!bSnap.exists()) {
+           await setDoc(bRef, {
+             earned_at: serverTimestamp(),
+             badge_name: badge.name
+           });
+           await createNotification(userId, "New Badge Earned! 🏆", `You've earned the "${badge.name}" badge. Check your profile.`, "badge");
+        }
       }
     } catch (e) {
       console.error("Error awarding badges:", e);
@@ -626,7 +657,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         await setDoc(doc(db, "volunteers", newUser.uid), {
           user_id: newUser.uid,
           available: true,
-          skills: [],
+          skills: data.skills || [],
+          ngo_ids: data.ngoIds || [],
           completed_tasks: 0,
           created_at: serverTimestamp()
         });

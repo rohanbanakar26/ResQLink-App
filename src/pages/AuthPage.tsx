@@ -21,11 +21,12 @@ const defaultRegister = {
   skills: "",
   registrationId: "",
   categories: [] as string[],
+  ngoIds: [] as string[],
 };
 
 export default function AuthPage() {
   const navigate = useNavigate();
-  const { login, register, isAuthenticated } = useAppData();
+  const { login, register, isAuthenticated, ngos, location } = useAppData();
   const [loginState, setLoginState] = useState({ email: "", password: "" });
   const [registerState, setRegisterState] = useState(defaultRegister);
   const [error, setError] = useState("");
@@ -238,10 +239,40 @@ export default function AuthPage() {
                   </div>
 
                   {registerState.role === "volunteer" && (
-                    <div className="space-y-2">
-                      <Label>Skills (comma-separated)</Label>
-                      <Input placeholder="medical, logistics, rescue" value={registerState.skills} onChange={(e) => setRegisterState({ ...registerState, skills: e.target.value })} />
-                    </div>
+                    <>
+                      <div className="space-y-2">
+                        <Label>Skills (comma-separated)</Label>
+                        <Input placeholder="medical, logistics, rescue" value={registerState.skills} onChange={(e) => setRegisterState({ ...registerState, skills: e.target.value })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Join Nearby NGOs (Select multiple)</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {ngos.map((ngo) => (
+                            <button
+                              type="button"
+                              key={ngo.id}
+                              onClick={() => {
+                                const has = registerState.ngoIds.includes(ngo.id);
+                                setRegisterState({
+                                  ...registerState,
+                                  ngoIds: has
+                                    ? registerState.ngoIds.filter((id) => id !== ngo.id)
+                                    : [...registerState.ngoIds, ngo.id],
+                                });
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                                registerState.ngoIds.includes(ngo.id)
+                                  ? "border-info bg-info/10 text-info"
+                                  : "border-border bg-card text-muted-foreground hover:border-info/30"
+                              }`}
+                            >
+                              🏢 {ngo.ngoName}
+                            </button>
+                          ))}
+                          {ngos.length === 0 && <p className="text-[10px] text-muted-foreground italic">No nearby NGOs currently active.</p>}
+                        </div>
+                      </div>
+                    </>
                   )}
 
                   <Button type="submit" className="w-full bg-emergency hover:bg-emergency/90 text-emergency-foreground" disabled={submitting}>
