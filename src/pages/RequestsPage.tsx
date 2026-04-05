@@ -186,8 +186,11 @@ export default function RequestsPage() {
                   <>
                     {req.assignedVolunteerId && (
                       <>
-                        <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat`)}>
-                          <MessageCircle className="w-3.5 h-3.5 mr-1" /> {t("chat.title")}
+                        <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/ngo-citizen`)}>
+                          <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with NGO
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/citizen-leader`)}>
+                          <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Loader
                         </Button>
                         <Button size="sm" variant="outline" className="text-success" onClick={() => {
                           const vol = volunteers.find((v) => v.id === req.assignedVolunteerId);
@@ -205,30 +208,12 @@ export default function RequestsPage() {
               </div>
             )}
 
-            {role === "ngo" && req.status !== "Completed" && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {req.status === "Requested" && (
-                  <Button size="sm" variant="outline" onClick={() => acceptRequest(req.id)}>
-                    {t("requests.accept")}
-                  </Button>
-                )}
-                {(req.status === "Accepted" || req.status === "Requested") && (
-                  <Select onValueChange={(v) => assignVolunteer(req.id, v)}>
-                    <SelectTrigger className="w-auto h-8 text-xs">
-                      <SelectValue placeholder="Assign volunteer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {volunteers.filter((v) => v.available).map((v) => (
-                        <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                <Button size="sm" variant="outline" className="text-success" onClick={() => completeRequest(req.id)}>
-                  <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> {t("requests.complete")}
+                <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/ngo-citizen`)}>
+                  <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Citizen
                 </Button>
-              </div>
-            )}
+                <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/team`)}>
+                  <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Team
+                </Button>
 
             {role === "volunteer" && req.status !== "Completed" && (
               <div className="flex flex-wrap gap-2 pt-1">
@@ -256,8 +241,11 @@ export default function RequestsPage() {
                         </a>
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => navigate(req.teamLeaderVolunteerId === userId ? `/requests/${req.id}/chat` : `/chat/${req.id}`)}>
-                      <MessageCircle className="w-3.5 h-3.5 mr-1" /> {req.teamLeaderVolunteerId === userId ? "Chat with Citizen" : "Team Group Chat"}
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/team`)}>
+                      <MessageCircle className="w-3.5 h-3.5 mr-1" /> Team Group Chat
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/citizen-leader`)}>
+                      <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Citizen
                     </Button>
                     {req.teamLeaderVolunteerId === userId && (
                       <Button size="sm" variant="outline" className="text-success" onClick={() => volunteerAdvance(req.id, "Verification Pending")}>

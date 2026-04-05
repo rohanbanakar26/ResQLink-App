@@ -21,6 +21,7 @@ import type { GeoPoint } from "../utils/geo";
 import { haversineDistance } from "../utils/geo";
 import { buildPriorityZones, calculatePriorityScore, getUrgencyValue, getSeverityValue } from "../utils/analytics";
 import { smartAnalyzeRequest, generateMissionBrief } from "@/lib/gemini";
+import { getEarnedBadges } from "../utils/badges";
 
 // Types
 export interface EmergencyRequest {
@@ -302,10 +303,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const activeRequests = useMemo(() => requests.filter((r) => r.status !== "Completed"), [requests]);
 
   const nearbyRequests = useMemo(() => {
-    return activeRequests
+    return requests
       .map((r) => ({ ...r, distanceKm: haversineDistance(location, r.location) }))
       .sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
-  }, [activeRequests, location]);
+  }, [requests, location]);
 
   const myRequests = useMemo(() => {
     if (!profile) return [];
@@ -483,6 +484,47 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     await autoAssignVolunteers(requestId);
   }, [profile, user, volunteers, autoAssignVolunteers]);
 
+  const checkAndAwardBadges = useCallback(async (userId: string) => {
+    try {
+      const pRef = doc(db, "profiles", userId);
+      const pSnap = await getDoc(pRef);
+      if (!pSnap.exists()) return;
+      const pData = pSnap.data();
+
+      // Calculate simplified stats for badge logic
+      let completedCount = 0;
+      if (pData.role === "volunteer") {
+        const vSnap = await getDoc(doc(db, "volunteers", userId));
+        completedCount = vSnap.data()?.completed_tasks || 0;
+      } else {
+        const q = query(collection(db, "emergency_requests"), where("user_id", "==", userId), where("status", "==", "Completed"));
+        const snap = await getDocs(q);
+        completedCount = snap.size;
+      }
+
+      const stats = {
+        completedTasks: completedCount,
+        avgResponseMinutes: null,
+        uniqueAreas: 1,
+        criticalTasks: 0,
+        highImpactTasks: 0,
+        isTopPercentile: false
+      };
+
+      const earned = getEarnedBadges(stats);
+      const currentBadgesRef = collection(db, "profiles", userId, "badges");
+      
+      for (const badge of earned) {
+        await setDoc(doc(currentBadgesRef, badge.id), {
+          earned_at: serverTimestamp(),
+          badge_name: badge.name
+        });
+      }
+    } catch (e) {
+      console.error("Error awarding badges:", e);
+    }
+  }, []);
+
   const citizenFinalize = useCallback(async (requestId: string, approved: boolean, feedback?: string, rating?: number) => {
     const status = approved ? "Completed" : "Cancelled";
     await updateDoc(doc(db, "emergency_requests", requestId), {
@@ -495,23 +537,39 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     });
 
     if (approved) {
-      // Award points (in-app logic)
+      // Award points & Badges
       const q = query(collection(db, "emergency_requests", requestId, "assignments"));
       const snaps = await getDocs(q);
       await Promise.all(snaps.docs.map(async d => {
         const vId = d.data().volunteer_id;
-        // Fetch volunteer's profile to get user_id
         const vSnap = await getDoc(doc(db, "volunteers", vId));
         if (vSnap.exists()) {
           const uId = vSnap.data().user_id;
           const pRef = doc(db, "profiles", uId);
+          const vRef = doc(db, "volunteers", vId);
+          
           await runTransaction(db, async (transaction) => {
              const pSnap = await transaction.get(pRef);
+             const vData = (await transaction.get(vRef)).data();
              const currentPoints = pSnap.data()?.points || 0;
-             transaction.update(pRef, { points: currentPoints + 50 });
+             const currentCompletions = vData?.completed_tasks || 0;
+             
+             transaction.update(pRef, { points: currentPoints + 150 }); // Higher points
+             transaction.update(vRef, { completed_tasks: currentCompletions + 1, available: true, current_task_id: null });
           });
+          
+          await checkAndAwardBadges(uId);
         }
       }));
+
+      // Award Citizen
+      const citizenRef = doc(db, "profiles", user!.uid);
+      await runTransaction(db, async (transaction) => {
+        const pSnap = await transaction.get(citizenRef);
+        const currentPoints = pSnap.data()?.points || 0;
+        transaction.update(citizenRef, { points: currentPoints + 50 });
+      });
+      await checkAndAwardBadges(user!.uid);
     }
   }, []);
 

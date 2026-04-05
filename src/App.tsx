@@ -38,7 +38,7 @@ const App = () => (
                 <Route path="/auth" element={<AuthPage />} />
                 <Route path="/emergency" element={<EmergencyPage />} />
                 <Route path="/requests" element={<RequestsPage />} />
-                <Route path="/requests/:requestId/chat" element={<ChatPage />} />
+                <Route path="/requests/:requestId/chat/:chatType" element={<ChatPage />} />
                 <Route path="/map" element={<MapPage />} />
                 <Route path="/network" element={<NetworkPage />} />
                 <Route path="/resources" element={<ResourcesPage />} />
