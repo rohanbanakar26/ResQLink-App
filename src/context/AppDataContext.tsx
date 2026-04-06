@@ -431,7 +431,29 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }).sort((a: any, b: any) => b.totalScore - a.totalScore);
 
     const needed = reqData.volunteers_needed || 1;
-    const toAssign = ranked.slice(0, needed);
+    let toAssign = ranked.slice(0, needed);
+    
+    // DYNAMIC SPILLOVER: If the NGO cannot fulfill the required amount, 
+    // we urgently pull external volunteers to augment the team!
+    if (!isGlobal && toAssign.length < needed) {
+      const remainingNeeded = needed - toAssign.length;
+      console.log(`[Augmenting Team] NGO short by ${remainingNeeded} volunteers. Pulling externally...`);
+      
+      const nonNgoVols = volDataRaw.filter((v: any) => v.ngo_memberships?.[reqData.ngo_id] !== "approved");
+      
+      const rankedNonNgo = nonNgoVols.map((v: any) => {
+        const vLoc = toGeo(v.location_lat, v.location_lng);
+        const dist = haversineDistance(reqLoc, vLoc);
+        const proximityScore = dist != null ? Math.max(0, 1 - dist/20) : 0;
+        const aiScore = aiMatch?.volunteerRankings?.[v.id] ?? (v.trustScore / 5);
+        const totalScore = (aiScore * 0.7) + (proximityScore * 0.3);
+        return { ...v, totalScore, dist };
+      }).sort((a: any, b: any) => b.totalScore - a.totalScore);
+      
+      const extraToAssign = rankedNonNgo.slice(0, remainingNeeded);
+      toAssign = [...toAssign, ...extraToAssign];
+    }
+    
     if (toAssign.length === 0) return;
 
     // Team Leader = highest trustScore among the chosen group
