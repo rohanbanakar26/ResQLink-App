@@ -113,6 +113,7 @@ interface AppDataContextValue {
   createEmergency: (data: Record<string, any>) => Promise<string>;
   acceptRequest: (id: string) => Promise<void>;
   assignVolunteer: (requestId: string, volunteerId: string) => Promise<void>;
+  autoAssignVolunteers: (requestId: string, isGlobal?: boolean) => Promise<void>;
   volunteerAdvance: (requestId: string, status: string) => Promise<void>;
   completeRequest: (id: string) => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
@@ -354,22 +355,28 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const autoAssignVolunteers = useCallback(async (requestId: string) => {
+  const autoAssignVolunteers = useCallback(async (requestId: string, isGlobal: boolean = false) => {
     const reqRef = doc(db, "emergency_requests", requestId);
     const reqSnap = await getDoc(reqRef);
     if (!reqSnap.exists()) return;
     const reqData = reqSnap.data();
+
+    if (!isGlobal && !reqData.ngo_id) {
+       console.log("Waiting for an NGO to accept the request before assigning volunteers.");
+       return; 
+    }
 
     // Query online volunteers
     const vQuery = query(collection(db, "volunteers"), where("available", "==", true));
     const vSnapshot = await getDocs(vQuery);
     
     if (vSnapshot.empty) {
-      console.warn("No available volunteers found for auto-assignment.");
+      console.warn("No available volunteers found for assignment.");
+      // In real escalations, we could potentially alert offline users via push here.
       return;
     }
 
-    const volData = await Promise.all(vSnapshot.docs.map(async d => {
+    const volDataRaw = await Promise.all(vSnapshot.docs.map(async d => {
       const v = d.data();
       const pSnap = await getDoc(doc(db, "profiles", v.user_id));
       return { 
@@ -380,6 +387,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         trustScore: pSnap.exists() ? (pSnap.data().trust_score || 0) : 0 
       };
     }));
+
+    // Filter by NGO if not escalating globally
+    const volData = isGlobal ? volDataRaw : volDataRaw.filter((v: any) => v.ngo_memberships?.[reqData.ngo_id] === "approved");
+
+    if (volData.length === 0) {
+      console.warn("No approved volunteers exist within this NGO. Wait for escalation or manual override.");
+      return;
+    }
 
     const reqLoc = toGeo(reqData.location_lat, reqData.location_lng);
     if (!reqLoc) return;
@@ -412,8 +427,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const toAssign = ranked.slice(0, needed);
     if (toAssign.length === 0) return;
 
-    const leaderId = toAssign[0].id;
-    const leaderName = toAssign[0].name;
+    // Team Leader = highest trustScore among the chosen group
+    const leaderData = [...toAssign].sort((a: any, b: any) => b.trustScore - a.trustScore)[0];
+    const leaderId = leaderData.id;
+    const leaderName = leaderData.name;
 
     // Generate Mission Brief (AI)
     let missionBrief = "";
@@ -483,9 +500,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       updated_at: serverTimestamp(),
     });
 
-    // Trigger AI Dispatcher immediately
-    await autoAssignVolunteers(docRef.id);
-
+    // Do NOT auto-assign instantly. Wait for NGO acceptance.
     return docRef.id;
   }, [user, profile, location, autoAssignVolunteers]);
 
@@ -758,6 +773,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     toggleAvailable,
     joinTask,
     createEmergency,
+    autoAssignVolunteers,
     acceptRequest,
     assignVolunteer,
     volunteerAdvance,
@@ -771,7 +787,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     register,
     logout,
     setEmergencyMode,
-  }), [authLoading, dataLoading, requests, activeRequests, nearbyRequests, myRequests, volunteers, ngos, priorityZones, profile, isAuthenticated, emergencyMode, isAvailable, isToggling, createEmergency, acceptRequest, assignVolunteer, volunteerAdvance, completeRequest, rejectTask, citizenFinalize, login, register, logout]);
+  }), [authLoading, dataLoading, requests, activeRequests, nearbyRequests, myRequests, volunteers, ngos, priorityZones, profile, isAuthenticated, emergencyMode, isAvailable, isToggling, createEmergency, autoAssignVolunteers, acceptRequest, assignVolunteer, volunteerAdvance, completeRequest, rejectTask, citizenFinalize, login, register, logout]);
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
 }

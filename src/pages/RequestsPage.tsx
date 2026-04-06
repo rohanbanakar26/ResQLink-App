@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { getCategoryMeta, STATUS_COPY } from "../data/system";
@@ -54,6 +54,31 @@ export default function RequestsPage() {
   const successRate = myRequests.length > 0
     ? Math.round((completedRequests.length / myRequests.length) * 100)
     : 0;
+
+  // 10-Minute Escalation Heartbeat
+  useEffect(() => {
+    if (role !== "citizen") return;
+
+    const interval = setInterval(() => {
+      activeRequests.forEach((req) => {
+        if (req.status === "Created" && req.createdAt) {
+          // If request is older than 10 mins and NGO hasn't accepted, force global escalation
+          const ageMs = Date.now() - new Date(req.createdAt).getTime();
+          if (ageMs > 10 * 60 * 1000) {
+            console.log(`Request ${req.id} escalated to global!`);
+            // The context method now accepts a boolean flag to ignore NGO requirement
+            // @ts-ignore
+            if (useAppData().autoAssignVolunteers) {
+               // @ts-ignore
+               useAppData().autoAssignVolunteers(req.id, true);
+            }
+          }
+        }
+      });
+    }, 60000); // Check every minute
+
+    return () => clearInterval(interval);
+  }, [activeRequests, role]);
 
   const handleUploadProofs = async (requestId: string, urls: string[]) => {
     await updateDoc(doc(db, "emergency_requests", requestId), {
@@ -208,12 +233,24 @@ export default function RequestsPage() {
               </div>
             )}
 
-                <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/ngo-citizen`)}>
-                  <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Citizen
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/team`)}>
-                  <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Team
-                </Button>
+            {role === "ngo" && req.status !== "Completed" && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {req.status === "Created" ? (
+                  <Button size="sm" className="bg-success hover:bg-success/90" onClick={() => acceptRequest(req.id)}>
+                    <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Accept Mission
+                  </Button>
+                ) : (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/ngo-citizen`)}>
+                      <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Citizen
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/team`)}>
+                      <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Field Team
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
 
             {role === "volunteer" && req.status !== "Completed" && (
               <div className="flex flex-wrap gap-2 pt-1">
