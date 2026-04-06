@@ -50,7 +50,7 @@ const QUICK_MESSAGES: Record<string, any[]> = {
 export default function ChatPage() {
   const { requestId, chatType } = useParams<{ requestId: string; chatType: string }>();
   const navigate = useNavigate();
-  const { currentUser, isAuthenticated, requests, volunteers, ngos } = useAppData();
+  const { currentUser, isAuthenticated, requests, volunteers, ngos, createNotification } = useAppData();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -138,6 +138,31 @@ export default function ChatPage() {
         created_at: serverTimestamp(),
       });
       setInput("");
+
+      // Dispatch Notifications
+      const senderStr = currentUser?.name || "Someone";
+      const shortMsg = content.length > 30 ? content.substring(0, 30) + "..." : content;
+      
+      if (chatType === "ngo-citizen") {
+        const targetId = currentUser?.role === "ngo" ? request.userId : ngo?.userId;
+        if (targetId) createNotification(targetId, `New Message from ${senderStr}`, shortMsg, "info");
+      } 
+      else if (chatType === "citizen-leader") {
+        const targetId = currentUser?.role === "citizen" ? leader?.userId : request.userId;
+        if (targetId) createNotification(targetId, `New Message from ${senderStr}`, shortMsg, "info");
+      }
+      else if (chatType === "team") {
+        // Team chat sends to everyone in the team EXCEPT the sender
+        const targets = new Set<string>();
+        if (ngo?.userId && ngo.userId !== userId) targets.add(ngo.userId);
+        if (leader?.userId && leader.userId !== userId) targets.add(leader.userId);
+        // If there were other volunteers, add them here
+        
+        targets.forEach(tId => {
+          createNotification(tId, `Team Update: ${senderStr}`, shortMsg, "info");
+        });
+      }
+
     } catch (e) {
       console.error("Error sending message:", e);
     } finally {

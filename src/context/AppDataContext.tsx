@@ -124,6 +124,7 @@ interface AppDataContextValue {
   citizenFinalize: (requestId: string, approved: boolean, feedback?: string, rating?: number) => Promise<void>;
   approveVolunteer: (volunteerId: string) => Promise<void>;
   rejectVolunteer: (volunteerId: string) => Promise<void>;
+  createNotification: (userId: string, title: string, body: string, type?: string) => Promise<void>;
 }
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
@@ -765,6 +766,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     citizenFinalize,
     approveVolunteer,
     rejectVolunteer,
+    createNotification,
     login,
     register,
     logout,
