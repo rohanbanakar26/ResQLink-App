@@ -286,9 +286,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const unsubscribeNgos = onSnapshot(ngosRef, async (snapshot) => {
       const ngoData = await Promise.all(snapshot.docs.map(async d => {
         const n = d.data();
-        const pRef = doc(db, "profiles", n.user_id);
-        const pSnap = await getDoc(pRef);
-        const pData = pSnap.exists() ? pSnap.data() : {};
+        let pData: any = {};
+        
+        try {
+          // Attempt to fetch extra details, will fail gracefully for unauthenticated users
+          const pRef = doc(db, "profiles", n.user_id);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) pData = pSnap.data();
+        } catch (e) {
+          // Ignore permission-denied errors on profiles for guests
+        }
 
         return {
           id: d.id,
