@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
-import { REQUEST_CATEGORIES } from "../data/system";
+import { REQUEST_CATEGORIES, NGO_SERVICE_CATEGORIES } from "../data/system";
 import { formatDistance, haversineDistance } from "../utils/geo";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -89,7 +89,7 @@ export default function NetworkPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All categories</SelectItem>
-                {REQUEST_CATEGORIES.map((c) => (
+                {NGO_SERVICE_CATEGORIES.map((c) => (
                   <SelectItem key={c.id} value={c.id}>{c.emoji} {c.label}</SelectItem>
                 ))}
               </SelectContent>

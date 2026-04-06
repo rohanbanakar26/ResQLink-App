@@ -194,7 +194,7 @@ export default function RequestsPage() {
                         </Button>
                         <Button size="sm" variant="outline" className="text-success" onClick={() => {
                           const vol = volunteers.find((v) => v.id === req.assignedVolunteerId);
-                          if (vol?.email) window.open(`tel:${vol.email}`, "_self");
+                          if (vol?.phone) window.open(`tel:${vol.phone}`, "_self");
                         }}>
                           <Phone className="w-3.5 h-3.5 mr-1" /> {t("chat.call")}
                         </Button>

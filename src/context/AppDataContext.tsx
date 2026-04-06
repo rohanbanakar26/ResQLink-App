@@ -57,6 +57,7 @@ export interface Volunteer {
   userId: string;
   name: string;
   email: string;
+  phone: string;
   skills: string[];
   location: GeoPoint | null;
   available: boolean;
@@ -72,6 +73,7 @@ export interface Ngo {
   userId: string;
   ngoName: string;
   email: string;
+  phone: string;
   services: string[];
   location: GeoPoint | null;
   trustScore: number;
@@ -256,6 +258,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           userId: v.user_id,
           name: pData.full_name || "",
           email: pData.email || "",
+          phone: pData.phone || "",
           skills: v.skills || [],
           location: toGeo(v.location_lat, v.location_lng),
           available: v.available ?? true,
@@ -290,6 +293,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           userId: n.user_id,
           ngoName: n.ngo_name,
           email: pData.email || "",
+          phone: pData.phone || "",
           services: n.services || [],
           location: toGeo(n.location_lat, n.location_lng),
           trustScore: pData.trust_score ?? 4.5,
@@ -297,6 +301,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         };
       }));
       setNgos(ngoData);
+      console.log(`Loaded ${ngoData.length} public NGOs for registration.`);
       setDataLoading(false);
     }, (err) => {
       console.error("NGOs listener error:", err);

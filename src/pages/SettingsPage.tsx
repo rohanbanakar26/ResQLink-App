@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAppData } from "@/context/AppDataContext";
 import { db, storage } from "@/lib/firebase";
@@ -17,13 +17,27 @@ import t from "@/utils/i18n";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { currentUser, isAuthenticated, logout } = useAppData();
+  const { currentUser, isAuthenticated, logout, volunteers, ngos } = useAppData();
   const [lang, setLang] = useState<Language>(getLanguage());
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(currentUser?.name || "");
   const [phone, setPhone] = useState(currentUser?.phone || "");
+  const [skillsStr, setSkillsStr] = useState("");
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+
+  const currentVolunteer = currentUser?.role === "volunteer" ? volunteers.find((v) => v.userId === currentUser?.userId) : null;
+  const currentNgo = currentUser?.role === "ngo" ? ngos.find((n) => n.userId === currentUser?.userId) : null;
+
+  useEffect(() => {
+    if (!editing) {
+      if (currentUser?.role === "volunteer" && currentVolunteer) {
+        setSkillsStr(currentVolunteer.skills?.join(", ") || "");
+      } else if (currentUser?.role === "ngo" && currentNgo) {
+        setSkillsStr(currentNgo.services?.join(", ") || "");
+      }
+    }
+  }, [editing, currentVolunteer, currentNgo, currentUser?.role]);
 
   if (!isAuthenticated || !currentUser) return <Navigate to="/auth" replace />;
 
@@ -43,6 +57,17 @@ export default function SettingsPage() {
         phone,
         language: lang,
       });
+
+      if (currentUser.role === "volunteer" && currentVolunteer?.id) {
+         await updateDoc(doc(db, "volunteers", currentVolunteer.id), {
+            skills: skillsStr.split(",").map(s => s.trim()).filter(Boolean)
+         });
+      } else if (currentUser.role === "ngo" && currentNgo?.id) {
+         await updateDoc(doc(db, "ngos", currentNgo.id), {
+            services: skillsStr.split(",").map(s => s.trim()).filter(Boolean)
+         });
+      }
+
       setEditing(false);
     } catch (e) {
       console.error("Error saving profile:", e);
@@ -133,7 +158,13 @@ export default function SettingsPage() {
                 <Label>{t("auth.phone")}</Label>
                 <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91..." />
               </div>
-              <div className="flex gap-3">
+              {(currentUser.role === "volunteer" || currentUser.role === "ngo") && (
+                <div className="space-y-2">
+                  <Label>{currentUser.role === "ngo" ? "Services (comma-separated)" : "Skills (comma-separated)"}</Label>
+                  <Input value={skillsStr} onChange={(e) => setSkillsStr(e.target.value)} placeholder="e.g. medical, rescue" />
+                </div>
+              )}
+              <div className="flex gap-3 mt-4">
                 <Button variant="outline" onClick={() => setEditing(false)} className="flex-1">
                   {t("general.cancel")}
                 </Button>
