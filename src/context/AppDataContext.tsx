@@ -261,7 +261,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           name: pData.full_name || "",
           email: pData.email || "",
           phone: pData.phone || "",
-          skills: v.skills || [],
+          skills: Array.isArray(v.skills) ? v.skills : (typeof v.skills === "string" ? v.skills.split(",").map((s: string) => s.trim()).filter(Boolean) : []),
           location: toGeo(v.location_lat, v.location_lng),
           available: v.available ?? true,
           trustScore: pData.trust_score ?? 4.5,
@@ -774,7 +774,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         await setDoc(doc(db, "volunteers", newUser.uid), {
           user_id: newUser.uid,
           available: true,
-          skills: data.skills || [],
+          skills: Array.isArray(data.skills) ? data.skills : (typeof data.skills === "string" ? data.skills.split(",").map((s: string) => s.trim()).filter(Boolean) : []),
           ngo_memberships: initialMemberships,
           completed_tasks: 0,
           created_at: serverTimestamp()
