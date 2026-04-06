@@ -51,10 +51,9 @@ interface Comment {
 }
 
 export default function ResourcesPage() {
-  const { isAuthenticated, currentUser, ngos, location } = useAppData();
+  const { isAuthenticated, currentUser, ngos, location, followingList, toggleFollow } = useAppData();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
-  const [follows, setFollows] = useState<Set<string>>(new Set());
   const [expandedComments, setExpandedComments] = useState<string | null>(null);
   const [comments, setComments] = useState<Record<string, Comment[]>>({});
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
@@ -70,14 +69,11 @@ export default function ResourcesPage() {
     const q = query(campaignsRef, orderBy("created_at", "desc"));
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
-      // Fetch user's likes and follows
+      // Fetch user's likes
       const likesQuery = query(collection(db, "campaign_likes"), where("user_id", "==", userId));
-      const followsQuery = query(collection(db, "ngo_follows"), where("user_id", "==", userId));
       
-      const [likesSnap, followsSnap] = await Promise.all([getDocs(likesQuery), getDocs(followsQuery)]);
+      const likesSnap = await getDocs(likesQuery);
       const likedSet = new Set(likesSnap.docs.map(d => d.data().campaign_id));
-      const followSet = new Set(followsSnap.docs.map(d => d.data().ngo_id));
-      setFollows(followSet);
 
       const campaignData = await Promise.all(snapshot.docs.map(async d => {
         const c = d.data();
@@ -125,17 +121,29 @@ export default function ResourcesPage() {
     }
   };
 
-  const toggleFollow = async (ngoId: string) => {
-    if (!userId) return;
-    const followQuery = query(collection(db, "ngo_follows"), where("ngo_id", "==", ngoId), where("user_id", "==", userId));
-    const followSnap = await getDocs(followQuery);
+  const sortedCampaigns = useMemo(() => {
+    return [...campaigns].sort((a, b) => {
+      const aFollowed = followingList.includes(a.ngoId);
+      const bFollowed = followingList.includes(b.ngoId);
+      
+      if (aFollowed && !bFollowed) return -1;
+      if (!aFollowed && bFollowed) return 1;
 
-    if (!followSnap.empty) {
-      await deleteDoc(followSnap.docs[0].ref);
-    } else {
-      await addDoc(collection(db, "ngo_follows"), { user_id: userId, ngo_id: ngoId, created_at: serverTimestamp() });
-    }
-  };
+      // Distance checking
+      const nA = ngos.find(n => n.id === a.ngoId);
+      const nB = ngos.find(n => n.id === b.ngoId);
+      const distA = nA ? haversineDistance(location, nA.location) ?? 999 : 999;
+      const distB = nB ? haversineDistance(location, nB.location) ?? 999 : 999;
+
+      const aNearby = distA <= 25;
+      const bNearby = distB <= 25;
+
+      if (aNearby && !bNearby) return -1;
+      if (!aNearby && bNearby) return 1;
+
+      return b.createdAt - a.createdAt; // Standard fallback
+    });
+  }, [campaigns, followingList, location, ngos]);
 
   const loadComments = async (campaignId: string) => {
     if (expandedComments === campaignId) {
@@ -218,11 +226,11 @@ export default function ResourcesPage() {
                   )}
                   <Button
                     size="sm"
-                    variant={follows.has(ngo.id) ? "secondary" : "outline"}
+                    variant={followingList.includes(ngo.id) ? "secondary" : "outline"}
                     className="w-full mt-2 h-7 text-[10px]"
-                    onClick={() => toggleFollow(ngo.id)}
+                    onClick={() => toggleFollow(ngo.id, "ngo")}
                   >
-                    {follows.has(ngo.id) ? (
+                    {followingList.includes(ngo.id) ? (
                       <><UserCheck className="w-3 h-3 mr-1" /> {t("resources.following")}</>
                     ) : (
                       <><UserPlus className="w-3 h-3 mr-1" /> {t("resources.follow")}</>
@@ -247,7 +255,7 @@ export default function ResourcesPage() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {campaigns.map((campaign) => (
+          {sortedCampaigns.map((campaign) => (
             <motion.div
               key={campaign.id}
               initial={{ opacity: 0, y: 20 }}
@@ -267,11 +275,11 @@ export default function ResourcesPage() {
                   </div>
                   <Button
                     size="sm"
-                    variant={follows.has(campaign.ngoId) ? "secondary" : "outline"}
+                    variant={followingList.includes(campaign.ngoId) ? "secondary" : "outline"}
                     className="h-7 text-[10px]"
-                    onClick={() => toggleFollow(campaign.ngoId)}
+                    onClick={() => toggleFollow(campaign.ngoId, "ngo")}
                   >
-                    {follows.has(campaign.ngoId) ? t("resources.following") : t("resources.follow")}
+                    {followingList.includes(campaign.ngoId) ? t("resources.following") : t("resources.follow")}
                   </Button>
                 </div>
 

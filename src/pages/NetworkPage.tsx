@@ -8,10 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, Building2, Star, MapPin } from "lucide-react";
+import { Users, Building2, Star, MapPin, UserPlus, UserCheck, Heart } from "lucide-react";
 
 export default function NetworkPage() {
-  const { ngos, volunteers, location, isAuthenticated } = useAppData();
+  const { ngos, volunteers, location, isAuthenticated, followingList, toggleFollow, currentUser } = useAppData();
   const [mode, setMode] = useState<"ngos" | "volunteers">("ngos");
   const [distanceLimit, setDistanceLimit] = useState(25);
   const [category, setCategory] = useState("all");
@@ -129,15 +129,30 @@ export default function NetworkPage() {
                 </div>
               </div>
               {mode === "volunteers" && (
-                <p className="text-xs text-muted-foreground mt-2">
+                <p className="text-xs text-muted-foreground mt-2 mb-2">
                   {item.completedTasks} tasks completed · {item.available ? "🟢 Available" : "🔴 Busy"}
                 </p>
               )}
               {mode === "ngos" && (
-                <p className="text-xs text-muted-foreground mt-2">
+                <p className="text-xs text-muted-foreground mt-2 mb-2">
                   Capacity: {item.capacity}
                 </p>
               )}
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
+                 <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground group-hover:text-emergency transition-colors">
+                    <Heart className="w-3.5 h-3.5" /> {item.followersCount || 0} Followers
+                 </div>
+                 {currentUser?.role === "citizen" && (
+                    <Button 
+                      size="sm" 
+                      variant={followingList.includes(item.id) ? "secondary" : "outline"}
+                      className="h-7 text-[10px]"
+                      onClick={() => toggleFollow(item.id, mode === "ngos" ? "ngo" : "volunteer")}
+                    >
+                      {followingList.includes(item.id) ? <><UserCheck className="w-3 h-3 mr-1" /> Following</> : <><UserPlus className="w-3 h-3 mr-1" /> Follow</>}
+                    </Button>
+                 )}
+              </div>
             </CardContent>
           </Card>
         ))}

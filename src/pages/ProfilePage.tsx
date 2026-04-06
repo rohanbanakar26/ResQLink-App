@@ -1,9 +1,10 @@
+import { useMemo } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useAppData } from "@/context/AppDataContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { User, Shield, Trophy, Settings, LogOut, ChevronRight, Zap, ArrowRight, Star, Loader2 } from "lucide-react";
+import { User, Shield, Trophy, Settings, LogOut, ChevronRight, Zap, ArrowRight, Star, Loader2, Heart, UserCheck } from "lucide-react";
 import { motion } from "framer-motion";
 import BadgeGrid from "@/components/profile/BadgeGrid";
 import StreakTracker from "@/components/profile/StreakTracker";
@@ -11,7 +12,13 @@ import TrustStars from "@/components/profile/TrustStars";
 import t from "@/utils/i18n";
 
 export default function ProfilePage() {
-  const { currentUser, logout, isAvailable, isAuthenticated, loading } = useAppData();
+  const { currentUser, logout, isAvailable, isAuthenticated, loading, followingList, ngos, volunteers } = useAppData();
+  
+  const followersCount = useMemo(() => {
+    if (currentUser?.role === "ngo") return ngos.find(n => n.userId === currentUser.userId)?.followersCount || 0;
+    if (currentUser?.role === "volunteer") return volunteers.find(v => v.userId === currentUser.userId)?.followersCount || 0;
+    return 0;
+  }, [currentUser, ngos, volunteers]);
 
   if (loading) {
     return (
@@ -68,6 +75,13 @@ export default function ProfilePage() {
           <div className="flex items-center justify-center gap-2 mt-1">
              <TrustStars score={4.8} size="md" />
              <span className="text-xs font-bold text-muted-foreground uppercase opacity-60 tracking-wider">Level 12 Protector</span>
+          </div>
+          <div className="mt-3 flex justify-center items-center gap-2">
+             {currentUser.role === "citizen" ? (
+               <Badge variant="outline" className="text-xs py-1"><UserCheck className="w-3.5 h-3.5 mr-1 text-emergency"/> {followingList.length} Following</Badge>
+             ) : (
+               <Badge variant="secondary" className="text-xs py-1"><Heart className="w-3.5 h-3.5 mr-1 text-emergency"/> {followersCount} Followers</Badge> 
+             )}
           </div>
         </div>
       </div>

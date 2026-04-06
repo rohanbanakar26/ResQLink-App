@@ -14,7 +14,8 @@ import {
   deleteDoc, 
   serverTimestamp, 
   orderBy,
-  runTransaction
+  runTransaction,
+  increment
 } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import type { GeoPoint } from "../utils/geo";
@@ -63,6 +64,7 @@ export interface Volunteer {
   available: boolean;
   trustScore: number;
   completedTasks: number;
+  followersCount?: number;
   distanceKm?: number | null;
   currentTaskId?: string | null;
   ngoMemberships: Record<string, "pending" | "approved">;
@@ -78,6 +80,7 @@ export interface Ngo {
   location: GeoPoint | null;
   trustScore: number;
   capacity: number;
+  followersCount?: number;
   distanceKm?: number | null;
 }
 
@@ -107,6 +110,8 @@ interface AppDataContextValue {
   priorityZones: any[];
   currentUser: UserProfile | null;
   isAuthenticated: boolean;
+  followingList: string[];
+  toggleFollow: (targetId: string, type: "ngo" | "volunteer") => Promise<void>;
   isAvailable: boolean;
   toggleAvailable: () => Promise<void>;
   joinTask: (requestId: string) => Promise<void>;
@@ -146,6 +151,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [isAvailable, setIsAvailable] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
+  const [followingList, setFollowingList] = useState<string[]>([]);
   const [location, setLocation] = useState<GeoPoint | null>(FALLBACK_LOCATION);
 
   const isAuthenticated = user !== null;
@@ -212,6 +218,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // 1.5. Listen to Follows
+    const followsQuery = query(collection(db, "user_follows"), where("user_id", "==", user.uid));
+    const unsubscribeFollows = onSnapshot(followsQuery, (snap) => {
+      setFollowingList(snap.docs.map(d => d.data().target_id));
+    });
+
     // 2. Listen to Requests
     const requestsRef = collection(db, "emergency_requests");
     const qRequests = query(requestsRef, orderBy("created_at", "desc"));
@@ -266,6 +278,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           available: v.available ?? true,
           trustScore: pData.trust_score ?? 4.5,
           completedTasks: v.completed_tasks || 0,
+          followersCount: v.followers_count || 0,
           currentTaskId: v.current_task_id,
           ngoMemberships: v.ngo_memberships || {},
         };
@@ -275,6 +288,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     return () => {
       unsubscribeProfile();
+      unsubscribeFollows();
       unsubscribeRequests();
       unsubscribeVolunteers();
     };
@@ -307,6 +321,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           location: toGeo(n.location_lat, n.location_lng),
           trustScore: pData.trust_score ?? 4.5,
           capacity: n.capacity || 10,
+          followersCount: n.followers_count || 0,
         };
       }));
       setNgos(ngoData);
@@ -807,6 +822,28 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setIsToggling(false);
   }, [isAvailable, profile, user]);
 
+  const toggleFollow = useCallback(async (targetId: string, type: "ngo" | "volunteer") => {
+    if (!user) return;
+    const q = query(collection(db, "user_follows"), where("user_id", "==", user.uid), where("target_id", "==", targetId));
+    const snap = await getDocs(q);
+    
+    const collectionName = type === "ngo" ? "ngos" : "volunteers";
+    const targetRef = doc(db, collectionName, targetId);
+
+    if (!snap.empty) {
+      await deleteDoc(snap.docs[0].ref);
+      await updateDoc(targetRef, { followers_count: increment(-1) }).catch(() => {});
+    } else {
+      await addDoc(collection(db, "user_follows"), {
+        user_id: user.uid,
+        target_id: targetId,
+        type,
+        created_at: serverTimestamp()
+      });
+      await updateDoc(targetRef, { followers_count: increment(1) }).catch(() => {});
+    }
+  }, [user]);
+
   const logout = useCallback(async () => {
     await signOut();
     setProfile(null);
@@ -827,6 +864,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     emergencyMode,
     isAvailable,
     isToggling,
+    followingList,
+    toggleFollow,
     toggleAvailable,
     joinTask,
     createEmergency,
@@ -844,7 +883,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     register,
     logout,
     setEmergencyMode,
-  }), [authLoading, dataLoading, requests, activeRequests, nearbyRequests, myRequests, volunteers, ngos, priorityZones, profile, isAuthenticated, emergencyMode, isAvailable, isToggling, createEmergency, autoAssignVolunteers, acceptRequest, assignVolunteer, volunteerAdvance, completeRequest, rejectTask, citizenFinalize, login, register, logout]);
+  }), [authLoading, dataLoading, requests, activeRequests, nearbyRequests, myRequests, volunteers, ngos, priorityZones, profile, isAuthenticated, emergencyMode, isAvailable, isToggling, followingList, createEmergency, autoAssignVolunteers, acceptRequest, assignVolunteer, volunteerAdvance, completeRequest, rejectTask, citizenFinalize, login, register, logout, toggleFollow]);
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
 }
