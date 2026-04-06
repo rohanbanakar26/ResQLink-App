@@ -608,6 +608,17 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       // Award points & Badges
       const q = query(collection(db, "emergency_requests", requestId, "assignments"));
       const snaps = await getDocs(q);
+      
+      let ngoUserToAward: string | null = null;
+      let reqDbId: string | null = null;
+      
+      const reqDoc = await getDoc(doc(db, "emergency_requests", requestId));
+      if (reqDoc.exists() && reqDoc.data().ngo_id) {
+         reqDbId = reqDoc.data().ngo_id;
+         const nDoc = await getDoc(doc(db, "ngos", reqDbId!));
+         ngoUserToAward = nDoc.exists() ? nDoc.data().user_id : null;
+      }
+
       await Promise.all(snaps.docs.map(async d => {
         const vId = d.data().volunteer_id;
         const vSnap = await getDoc(doc(db, "volunteers", vId));
@@ -622,7 +633,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
              const currentPoints = pSnap.data()?.points || 0;
              const currentCompletions = vData?.completed_tasks || 0;
              
-             transaction.update(pRef, { points: currentPoints + 150 }); // Higher points
+             transaction.update(pRef, { points: currentPoints + 150 }); // Higher points for volunteers
              transaction.update(vRef, { completed_tasks: currentCompletions + 1, available: true, current_task_id: null });
           });
           
@@ -638,6 +649,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         transaction.update(citizenRef, { points: currentPoints + 50 });
       });
       await checkAndAwardBadges(user!.uid);
+
+      // Award NGO Supervisor
+      if (ngoUserToAward && reqDbId) {
+         const ngoProfileRef = doc(db, "profiles", ngoUserToAward);
+         const ngoRef = doc(db, "ngos", reqDbId);
+         
+         await runTransaction(db, async (transaction) => {
+            const pSnap = await transaction.get(ngoProfileRef);
+            const currentPoints = pSnap.exists() ? (pSnap.data().points || 0) : 0;
+            transaction.update(ngoProfileRef, { points: currentPoints + 100 });
+            
+            const nSnap = await transaction.get(ngoRef);
+            const currentComps = nSnap.exists() ? (nSnap.data().completed_tasks || 0) : 0;
+            transaction.update(ngoRef, { completed_tasks: currentComps + 1 });
+         });
+         await checkAndAwardBadges(ngoUserToAward);
+      }
     }
   }, []);
 
