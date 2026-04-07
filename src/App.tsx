@@ -14,6 +14,7 @@ import RequestsPage from "./pages/RequestsPage";
 import MapPage from "./pages/MapPage";
 import NetworkPage from "./pages/NetworkPage";
 import ProfilePage from "./pages/ProfilePage";
+import PublicProfilePage from "./pages/PublicProfilePage";
 import ResourcesPage from "./pages/ResourcesPage";
 import ChatPage from "./pages/ChatPage";
 import NotificationsPage from "./pages/NotificationsPage";
@@ -45,6 +46,7 @@ const App = () => (
                 <Route path="/notifications" element={<NotificationsPage />} />
                 <Route path="/rewards" element={<RewardsPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
+                <Route path="/profile/:id" element={<PublicProfilePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>

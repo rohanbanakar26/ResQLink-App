@@ -110,7 +110,7 @@ export default function SearchOverlay({ open, onClose }: SearchOverlayProps) {
             </div>
             <div className="space-y-2">
               {filteredNgos.map((ngo) => (
-                <Card key={ngo.id} className="cursor-pointer hover:shadow-md transition-shadow border-border/50" onClick={() => { onClose(); navigate("/network"); }}>
+                <Card key={ngo.id} className="cursor-pointer hover:shadow-md transition-shadow border-border/50" onClick={() => { onClose(); navigate(`/profile/${ngo.id}`); }}>
                   <CardContent className="p-3 flex items-center gap-3">
                     <Building2 className="w-5 h-5 text-success flex-shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -132,7 +132,7 @@ export default function SearchOverlay({ open, onClose }: SearchOverlayProps) {
             </div>
             <div className="space-y-2">
               {filteredVolunteers.map((vol) => (
-                <Card key={vol.id} className="cursor-pointer hover:shadow-md transition-shadow border-border/50" onClick={() => { onClose(); navigate("/network"); }}>
+                <Card key={vol.id} className="cursor-pointer hover:shadow-md transition-shadow border-border/50" onClick={() => { onClose(); navigate(`/profile/${vol.id}`); }}>
                   <CardContent className="p-3 flex items-center gap-3">
                     <Users className="w-5 h-5 text-info flex-shrink-0" />
                     <div className="flex-1 min-w-0">
