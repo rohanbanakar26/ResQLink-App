@@ -106,6 +106,31 @@ export default function NgoControlCenter() {
         </div>
       </div>
 
+      {/* Tab Navigation — Horizontal Scroll */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1 mt-2">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all border flex-shrink-0 ${
+                isActive
+                  ? "bg-emergency/10 border-emergency/30 text-emergency shadow-sm"
+                  : "bg-card border-border/30 text-muted-foreground hover:border-border hover:text-foreground"
+              }`}
+            >
+              <Icon className={`w-3.5 h-3.5 ${isActive ? item.color : ""}`} />
+              {t(item.label)}
+              {item.id === "alerts" && alertCount > 0 && (
+                <span className="w-4 h-4 rounded-full bg-emergency text-emergency-foreground text-[8px] flex items-center justify-center ml-0.5">{alertCount}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Metrics Cards */}
       {activeTab === "overview" && (
         <>
@@ -147,7 +172,10 @@ export default function NgoControlCenter() {
               </Badge>
             </div>
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-              {nearbyRequests.slice(0, 8).map((req) => {
+              {nearbyRequests
+                .filter(r => r.status !== "Completed" && r.status !== "Cancelled")
+                .slice(0, 8)
+                .map((req) => {
                 const cat = getCategoryMeta(req.category);
                 return (
                   <Card key={req.id} className="border-border/30 hover:border-emergency/20 transition-all cursor-pointer" onClick={() => setActiveTab("requests")}>
@@ -169,7 +197,7 @@ export default function NgoControlCenter() {
                   </Card>
                 );
               })}
-              {nearbyRequests.length === 0 && (
+              {nearbyRequests.filter(r => r.status !== "Completed" && r.status !== "Cancelled").length === 0 && (
                 <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">No incoming requests right now.</CardContent></Card>
               )}
             </div>
@@ -177,30 +205,6 @@ export default function NgoControlCenter() {
         </>
       )}
 
-      {/* Tab Navigation — Horizontal Scroll */}
-      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all border flex-shrink-0 ${
-                isActive
-                  ? "bg-emergency/10 border-emergency/30 text-emergency shadow-sm"
-                  : "bg-card border-border/30 text-muted-foreground hover:border-border hover:text-foreground"
-              }`}
-            >
-              <Icon className={`w-3.5 h-3.5 ${isActive ? item.color : ""}`} />
-              {t(item.label)}
-              {item.id === "alerts" && alertCount > 0 && (
-                <span className="w-4 h-4 rounded-full bg-emergency text-emergency-foreground text-[8px] flex items-center justify-center ml-0.5">{alertCount}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
 
       {/* Active Tab Content */}
       {activeTab !== "overview" && (
