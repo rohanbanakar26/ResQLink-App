@@ -1,10 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useAppData } from "@/context/AppDataContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { User, Shield, Trophy, Settings, LogOut, ChevronRight, Zap, ArrowRight, Star, Loader2, Heart, UserCheck } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { db } from "@/lib/firebase";
+import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
+import { User, Shield, Trophy, Settings, LogOut, ChevronRight, Zap, ArrowRight, Star, Loader2, Heart, UserCheck, Building2 } from "lucide-react";
 import { motion } from "framer-motion";
 import BadgeGrid from "@/components/profile/BadgeGrid";
 import StreakTracker from "@/components/profile/StreakTracker";
@@ -19,6 +22,56 @@ export default function ProfilePage() {
     if (currentUser?.role === "volunteer") return volunteers.find(v => v.userId === currentUser.userId)?.followersCount || 0;
     return 0;
   }, [currentUser, ngos, volunteers]);
+
+  const [followerDetails, setFollowerDetails] = useState<{ id: string; name: string; role: string; type?: string }[]>([]);
+  const [loadingFollowers, setLoadingFollowers] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    
+    if (currentUser?.role === "citizen") {
+      const combined = [
+        ...ngos.filter(n => followingList.includes(n.id)).map(n => ({ id: n.id, name: n.ngoName, role: "ngo", type: "ngo" })),
+        ...volunteers.filter(v => followingList.includes(v.id)).map(v => ({ id: v.id, name: v.name, role: "volunteer", type: "volunteer" }))
+      ];
+      setFollowerDetails(combined);
+      return;
+    }
+
+    const fetchFollowers = async () => {
+      setLoadingFollowers(true);
+      try {
+        let myId = "";
+        if (currentUser?.role === "ngo") myId = ngos.find(n => n.userId === currentUser.userId)?.id || "";
+        if (currentUser?.role === "volunteer") myId = volunteers.find(v => v.userId === currentUser.userId)?.id || "";
+        
+        if (!myId) {
+          setLoadingFollowers(false);
+          return;
+        }
+
+        const q = query(collection(db, "user_follows"), where("target_id", "==", myId));
+        const snap = await getDocs(q);
+        const userIds = snap.docs.map(d => d.data().user_id);
+        
+        const details = [];
+        for (const uid of userIds) {
+          const pRef = doc(db, "profiles", uid);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) {
+             details.push({ id: uid, name: pSnap.data().full_name || pSnap.data().email?.split("@")[0] || "Citizen", role: pSnap.data().role || "citizen", type: pSnap.data().role });
+          }
+        }
+        setFollowerDetails(details);
+      } catch (e) {
+        console.error("Error fetching followers:", e);
+      }
+      setLoadingFollowers(false);
+    };
+
+    fetchFollowers();
+  }, [dialogOpen, currentUser, followingList, ngos, volunteers]);
 
   if (loading) {
     return (
@@ -77,11 +130,47 @@ export default function ProfilePage() {
              <span className="text-xs font-bold text-muted-foreground uppercase opacity-60 tracking-wider">Level 12 Protector</span>
           </div>
           <div className="mt-3 flex justify-center items-center gap-2">
-             {currentUser.role === "citizen" ? (
-               <Badge variant="outline" className="text-xs py-1"><UserCheck className="w-3.5 h-3.5 mr-1 text-emergency"/> {followingList.length} Following</Badge>
-             ) : (
-               <Badge variant="secondary" className="text-xs py-1"><Heart className="w-3.5 h-3.5 mr-1 text-emergency"/> {followersCount} Followers</Badge> 
-             )}
+             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+               <DialogTrigger asChild>
+                 <div className="inline-block cursor-pointer">
+                   {currentUser.role === "citizen" ? (
+                     <Badge variant="outline" className="text-xs py-1 hover:bg-muted transition-colors"><UserCheck className="w-3.5 h-3.5 mr-1 text-emergency"/> {followingList.length} Following</Badge>
+                   ) : (
+                     <Badge variant="secondary" className="text-xs py-1 hover:bg-secondary/80 transition-colors"><Heart className="w-3.5 h-3.5 mr-1 text-emergency"/> {followersCount} Followers</Badge> 
+                   )}
+                 </div>
+               </DialogTrigger>
+               <DialogContent className="sm:max-w-md bg-background/95 backdrop-blur-md">
+                 <DialogHeader>
+                   <DialogTitle className="text-xl font-black uppercase tracking-wider">{currentUser.role === "citizen" ? "Following" : "Followers"}</DialogTitle>
+                 </DialogHeader>
+                 <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 mt-2">
+                    {loadingFollowers ? (
+                      <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+                    ) : followerDetails.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-muted-foreground font-bold">
+                        {currentUser.role === "citizen" ? "You are not following anyone yet." : "No followers yet."}
+                      </p>
+                    ) : (
+                      followerDetails.map((f, i) => (
+                        <motion.div key={f.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                          <Card className="border-border/40 shadow-sm bg-card hover:bg-muted/30 transition-colors">
+                            <CardContent className="p-3 flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-emergency/10 flex items-center justify-center text-emergency border border-emergency/20">
+                                {f.role === "ngo" ? <Building2 className="w-5 h-5" /> : <User className="w-5 h-5" />}
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-sm font-black text-foreground tracking-tight">{f.name}</p>
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{f.role}</p>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </motion.div>
+                      ))
+                    )}
+                 </div>
+               </DialogContent>
+             </Dialog>
           </div>
         </div>
       </div>
