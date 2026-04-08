@@ -16,7 +16,7 @@ export default function VolunteerDashboard() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [declinedRequests, setDeclinedRequests] = useState<Set<string>>(new Set());
 
-  const eligibleRequests = nearbyRequests.filter((r) => !declinedRequests.has(r.id) && (r.status === "Created" || r.status === "Waiting for volunteers"));
+  const eligibleRequests = nearbyRequests.filter((r) => !declinedRequests.has(r.id) && r.status === "Waiting for volunteers");
 
   if (selectedTaskId) {
     return <TaskDetailView requestId={selectedTaskId} onBack={() => setSelectedTaskId(null)} />;
