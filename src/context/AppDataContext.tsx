@@ -462,12 +462,24 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Fetch available volunteers
-    const vQuery = query(collection(db, "volunteers"), where("available", "==", true));
+    // Fetch ALL volunteers — we'll filter by NGO membership below.
+    // We query all, NOT just available==true, because a volunteer in the primary
+    // NGO may be currently marked offline but can toggle available and accept.
+    // Cascade to other NGOs must NOT happen just because some volunteers are busy.
+    const vQuery = query(collection(db, "volunteers"));
     const vSnapshot = await getDocs(vQuery);
     if (vSnapshot.empty) {
-      console.warn("[AutoAssign] No available volunteers found.");
-      await handleVolunteerShortage(requestId);
+      console.warn("[AutoAssign] No volunteers found in database at all.");
+      // Nothing to do — notify the NGO admin to register volunteers first
+      const ngoSnap = await getDoc(doc(db, "ngos", targetNgoId));
+      if (ngoSnap.exists()) {
+        await createNotification(
+          ngoSnap.data().user_id,
+          "⚠️ No Volunteers Found",
+          "Your NGO has no volunteers yet. Please invite volunteers to join your NGO.",
+          "warning"
+        );
+      }
       return;
     }
 
@@ -495,9 +507,24 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         );
 
     if (eligiblePool.length === 0) {
-      console.warn(`[AutoAssign] No eligible volunteers in ${isGlobal ? "global pool" : `NGO ${targetNgoId}`}.`);
-      if (!isGlobal) await handleVolunteerShortage(requestId);
-      return;
+      console.warn(`[AutoAssign] No eligible volunteers in NGO ${targetNgoId}. Notifying NGO admin.`);
+      if (!isGlobal) {
+        // Notify the NGO admin — their pool is empty, not cascading to other NGOs
+        try {
+          const ngoSnap = await getDoc(doc(db, "ngos", targetNgoId));
+          if (ngoSnap.exists()) {
+            await createNotification(
+              ngoSnap.data().user_id,
+              "⚠️ No Eligible Volunteers Available",
+              "None of your approved volunteers are available for the accepted emergency. Please approve more volunteers or ask existing ones to toggle Available.",
+              "warning"
+            );
+          }
+        } catch (e) {
+          console.warn("[AutoAssign] Failed to notify NGO admin:", e);
+        }
+      }
+      return; // STOP — do not cascade to other NGOs
     }
 
     const reqLoc = toGeo(reqData.location_lat, reqData.location_lng);
@@ -528,7 +555,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     const toAssign = ranked.slice(0, remaining);
     if (toAssign.length === 0) {
-      await handleVolunteerShortage(requestId);
+      // Ranked list was empty after scoring — just stop, no cascade
+      console.warn("[AutoAssign] Ranked pool is empty after scoring. Stopping.");
       return;
     }
 
@@ -952,12 +980,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     // ── STEP 1: Try to refill from the primary NGO first ─────────────────
     const primaryNgoId = reqData.ngo_id;
     if (primaryNgoId) {
-      // Find available volunteers that belong to the primary NGO
-      // and are NOT already assigned to this request
-      const vQuery = query(collection(db, "volunteers"), where("available", "==", true));
-      const vSnap = await getDocs(vQuery);
+      // Query ALL volunteers from that NGO (not just available==true).
+      // A volunteer might be offline right now but can toggle Available and accept.
+      const vSnap = await getDocs(query(collection(db, "volunteers")));
 
-      const sameNgoAvailable = vSnap.docs.filter((d) => {
+      const sameNgoPool = vSnap.docs.filter((d) => {
         const memberships = d.data().ngo_memberships || {};
         return (
           memberships[primaryNgoId] === "approved" &&
@@ -966,19 +993,20 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         );
       });
 
-      if (sameNgoAvailable.length > 0) {
-        // Primary NGO still has volunteers — fill the slot from the same NGO
+      if (sameNgoPool.length > 0) {
+        // Primary NGO still has more members — try to fill the slot from same NGO
         console.log(
-          `[RejectTask] Primary NGO (${primaryNgoId}) has ${sameNgoAvailable.length} more available volunteer(s). Refilling from same NGO.`
+          `[RejectTask] Primary NGO (${primaryNgoId}) has ${sameNgoPool.length} more member(s). Refilling from same NGO.`
         );
         await autoAssignVolunteers(requestId, primaryNgoId);
         return; // Done — no need to involve other NGOs
       }
 
       console.log(
-        `[RejectTask] Primary NGO (${primaryNgoId}) has no more available volunteers. Cascading to next nearby NGO.`
+        `[RejectTask] Primary NGO (${primaryNgoId}) has no more approved members. Cascading to next nearby NGO.`
       );
     }
+
 
     // ── STEP 2: Primary NGO exhausted → cascade to other nearby NGOs ─────
     await handleVolunteerShortage(requestId);
