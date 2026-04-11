@@ -609,10 +609,19 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       )
     );
 
-    // If slots still unfilled, cascade to next nearby NGOs
+    // ── IMPORTANT: Do NOT cascade to other NGOs here ──────────────────────
+    // If this NGO's pool couldn't fill all slots right now (some volunteers
+    // are currently busy/offline), we simply record the shortage and STOP.
+    // Cascade to other NGOs only happens when a volunteer ACTIVELY REJECTS
+    // their assignment (handled in rejectTask below).
+    // This gives the primary NGO's volunteers a real chance to accept first.
     if (stillRemaining > 0 && !isGlobal) {
-      console.log(`[AutoAssign] ${stillRemaining} slot(s) still open after NGO ${targetNgoId}. Cascading...`);
-      await handleVolunteerShortage(requestId);
+      console.log(`[AutoAssign] ${stillRemaining} slot(s) open in NGO ${targetNgoId}. Waiting for volunteer responses before cascading.`);
+      // Just update the remaining count — no cascade yet
+      await updateDoc(reqRef, {
+        remaining_volunteers_needed: stillRemaining,
+        updated_at: serverTimestamp(),
+      });
     }
   }, [createNotification]);
 
@@ -889,6 +898,20 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   // ── Reject Task (volunteer declines) ─────────────────────────────────────
 
+  /**
+   * Correct cascade order when a volunteer rejects:
+   *
+   * STEP 1 — Try to replace from the SAME primary NGO first.
+   *   The rejecting volunteer freed their slot. Before going elsewhere,
+   *   check if the primary NGO still has other available approved volunteers
+   *   who haven't been assigned yet. If yes → assign one more from the same NGO.
+   *
+   * STEP 2 — Only if the primary NGO's pool is NOW exhausted, cascade to
+   *   other nearby NGOs via handleVolunteerShortage.
+   *
+   * This ensures other NGOs are NEVER involved unless the primary NGO truly
+   * cannot provide enough volunteers.
+   */
   const rejectTask = useCallback(async (requestId: string) => {
     if (!profile || !user) return;
     const vol = volunteers.find((v) => v.userId === user.uid);
@@ -901,25 +924,65 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       transaction.update(doc(db, "volunteers", vol.id), { available: true, current_task_id: null });
     });
 
-    // Decrement remaining_volunteers_needed and cascade to next nearby NGO
+    // Re-fetch request to get current state
     const reqRef = doc(db, "emergency_requests", requestId);
     const reqSnap = await getDoc(reqRef);
-    if (reqSnap.exists()) {
-      const reqData = reqSnap.data();
-      const currentAssigned = (reqData.assigned_volunteer_ids || []).filter((vid: string) => vid !== vol.id);
-      const totalNeeded = reqData.volunteers_needed || 1;
-      const newRemaining = totalNeeded - currentAssigned.length;
+    if (!reqSnap.exists()) return;
+    const reqData = reqSnap.data();
 
-      await updateDoc(reqRef, {
-        assigned_volunteer_ids: currentAssigned,
-        remaining_volunteers_needed: newRemaining,
-        updated_at: serverTimestamp(),
-      });
+    // Update assigned list (remove the rejecting volunteer)
+    const currentAssigned = (reqData.assigned_volunteer_ids || []).filter(
+      (vid: string) => vid !== vol.id
+    );
+    const totalNeeded = reqData.volunteers_needed || 1;
+    const newRemaining = totalNeeded - currentAssigned.length;
+
+    await updateDoc(reqRef, {
+      assigned_volunteer_ids: currentAssigned,
+      remaining_volunteers_needed: newRemaining,
+      updated_at: serverTimestamp(),
+    });
+
+    if (newRemaining <= 0) {
+      // Team is still fully staffed (edge case) — nothing to do
+      console.log(`[RejectTask] Slot freed but team is still full. No cascade needed.`);
+      return;
     }
 
-    // Trigger shortage cascade — find next NGO to fill the gap
+    // ── STEP 1: Try to refill from the primary NGO first ─────────────────
+    const primaryNgoId = reqData.ngo_id;
+    if (primaryNgoId) {
+      // Find available volunteers that belong to the primary NGO
+      // and are NOT already assigned to this request
+      const vQuery = query(collection(db, "volunteers"), where("available", "==", true));
+      const vSnap = await getDocs(vQuery);
+
+      const sameNgoAvailable = vSnap.docs.filter((d) => {
+        const memberships = d.data().ngo_memberships || {};
+        return (
+          memberships[primaryNgoId] === "approved" &&
+          !currentAssigned.includes(d.id) &&
+          d.id !== vol.id // exclude the one who just rejected
+        );
+      });
+
+      if (sameNgoAvailable.length > 0) {
+        // Primary NGO still has volunteers — fill the slot from the same NGO
+        console.log(
+          `[RejectTask] Primary NGO (${primaryNgoId}) has ${sameNgoAvailable.length} more available volunteer(s). Refilling from same NGO.`
+        );
+        await autoAssignVolunteers(requestId, primaryNgoId);
+        return; // Done — no need to involve other NGOs
+      }
+
+      console.log(
+        `[RejectTask] Primary NGO (${primaryNgoId}) has no more available volunteers. Cascading to next nearby NGO.`
+      );
+    }
+
+    // ── STEP 2: Primary NGO exhausted → cascade to other nearby NGOs ─────
     await handleVolunteerShortage(requestId);
-  }, [profile, user, volunteers, handleVolunteerShortage]);
+  }, [profile, user, volunteers, autoAssignVolunteers, handleVolunteerShortage]);
 
   // ── Acknowledge Assignment (volunteer confirms mission) ───────────────────
 
