@@ -26,8 +26,9 @@ const defaultRegister = {
 
 export default function AuthPage() {
   const navigate = useNavigate();
-  const { login, register, isAuthenticated, ngos, location } = useAppData();
+  const { login, register, isAuthenticated, ngos, location, resetPassword } = useAppData();
   const [loginState, setLoginState] = useState({ email: "", password: "" });
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [registerState, setRegisterState] = useState(defaultRegister);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -57,6 +58,26 @@ export default function AuthPage() {
       navigate("/emergency");
     } catch (err: any) {
       setError(err.message || "Login failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    if (!loginState.email) {
+      setError("Please enter your email to reset password.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await resetPassword(loginState.email);
+      setSuccess("Password reset email sent! Please check your inbox and spam/junk folder.");
+      setIsForgotPassword(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to send reset email.");
     } finally {
       setSubmitting(false);
     }
@@ -132,30 +153,77 @@ export default function AuthPage() {
           <TabsContent value="login">
             <Card>
               <CardContent className="p-6">
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Email</Label>
-                    <Input
-                      type="email"
-                      placeholder="you@example.com"
-                      value={loginState.email}
-                      onChange={(e) => setLoginState({ ...loginState, email: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Password</Label>
-                    <Input
-                      type="password"
-                      placeholder="••••••••"
-                      value={loginState.password}
-                      onChange={(e) => setLoginState({ ...loginState, password: e.target.value })}
-                    />
-                  </div>
-                  <Button type="submit" className="w-full bg-emergency hover:bg-emergency/90 text-emergency-foreground" disabled={submitting}>
-                    {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                    Sign In
-                  </Button>
-                </form>
+                {isForgotPassword ? (
+                  <form onSubmit={handleResetPassword} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Reset Password</Label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Enter your email address to receive a password reset link.
+                      </p>
+                      <Input
+                        type="email"
+                        placeholder="you@example.com"
+                        value={loginState.email}
+                        onChange={(e) => setLoginState({ ...loginState, email: e.target.value })}
+                      />
+                    </div>
+                    <Button type="submit" className="w-full bg-emergency hover:bg-emergency/90 text-emergency-foreground" disabled={submitting}>
+                      {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                      Send Reset Link
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="link" 
+                      className="w-full text-xs" 
+                      onClick={() => {
+                        setIsForgotPassword(false);
+                        setError("");
+                      }}
+                      disabled={submitting}
+                    >
+                      Back to Sign In
+                    </Button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleLogin} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Email</Label>
+                      <Input
+                        type="email"
+                        placeholder="you@example.com"
+                        value={loginState.email}
+                        onChange={(e) => setLoginState({ ...loginState, email: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label>Password</Label>
+                        <Button 
+                          type="button" 
+                          variant="link" 
+                          className="p-0 h-auto text-xs font-normal" 
+                          onClick={() => {
+                            setIsForgotPassword(true);
+                            setError("");
+                            setSuccess("");
+                          }}
+                        >
+                          Forgot Password?
+                        </Button>
+                      </div>
+                      <Input
+                        type="password"
+                        placeholder="••••••••"
+                        value={loginState.password}
+                        onChange={(e) => setLoginState({ ...loginState, password: e.target.value })}
+                      />
+                    </div>
+                    <Button type="submit" className="w-full bg-emergency hover:bg-emergency/90 text-emergency-foreground" disabled={submitting}>
+                      {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                      Sign In
+                    </Button>
+                  </form>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

@@ -15,6 +15,7 @@ import {
   serverTimestamp,
   orderBy,
   runTransaction,
+  writeBatch,
   increment,
   arrayUnion,
 } from "firebase/firestore";
@@ -141,6 +142,7 @@ interface AppDataContextValue {
   login: (email: string, password: string) => Promise<boolean>;
   register: (data: any) => Promise<boolean>;
   logout: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   setEmergencyMode: (v: boolean) => void;
   isToggling: boolean;
   rejectTask: (requestId: string) => Promise<void>;
@@ -163,7 +165,7 @@ function toGeo(lat: number | null, lng: number | null): GeoPoint | null {
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export function AppDataProvider({ children }: { children: ReactNode }) {
-  const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
+  const { user, loading: authLoading, signIn, signUp, signOut, resetPassword } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [requests, setRequests] = useState<EmergencyRequest[]>([]);
   const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
@@ -243,9 +245,27 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setFollowingList(snap.docs.map((d) => d.data().target_id));
     });
 
+    return () => {
+      unsubscribeProfile();
+      unsubscribeFollows();
+    };
+  }, [user]);
+
+  // ── Secure Requests & Volunteers Listener ─────────────────────────────────
+  useEffect(() => {
+    if (!user || user.uid !== profile?.userId) {
+      return;
+    }
+
     // 3. Requests
     const requestsRef = collection(db, "emergency_requests");
-    const qRequests = query(requestsRef, orderBy("created_at", "desc"));
+    let qRequests = query(requestsRef, orderBy("created_at", "desc"));
+    
+    // Secure scope: Citizens only sync their own requests locally.
+    if (profile.role === "citizen") {
+      qRequests = query(requestsRef, where("user_id", "==", user.uid), orderBy("created_at", "desc"));
+    }
+
     const unsubscribeRequests = onSnapshot(
       qRequests,
       (snapshot) => {
@@ -321,12 +341,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }, (err) => console.error("Volunteers listener error:", err));
 
     return () => {
-      unsubscribeProfile();
-      unsubscribeFollows();
       unsubscribeRequests();
       unsubscribeVolunteers();
     };
-  }, [user]);
+  }, [user, profile?.role, profile?.userId]);
 
   // ── NGOs (public) ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -593,37 +611,38 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const stillRemaining = remaining - toAssign.length;
 
     // Atomic Firestore write
-    await runTransaction(db, async (transaction) => {
-      toAssign.forEach((v: any) => {
-        transaction.update(doc(db, "volunteers", v.id), {
-          available: false,
-          current_task_id: requestId,
-        });
-        const assignRef = doc(collection(db, "emergency_requests", requestId, "assignments"), v.id);
-        transaction.set(assignRef, {
-          volunteer_id: v.id,
-          ngo_id: targetNgoId,
-          status: "assigned",
-          is_leader: v.id === leaderId,
-          created_at: serverTimestamp(),
-        });
+    const batch = writeBatch(db);
+    toAssign.forEach((v: any) => {
+      batch.update(doc(db, "volunteers", v.id), {
+        available: false,
+        current_task_id: requestId,
       });
-
-      transaction.update(reqRef, {
-        status: "Volunteer assigned",
-        assigned_volunteer_id: leaderId,
-        volunteer_name: leaderName,
-        team_leader_volunteer_id: leaderId,
-        // Merge new IDs into the full list
-        assigned_volunteer_ids: arrayUnion(...newAssignedIds),
-        remaining_volunteers_needed: stillRemaining > 0 ? stillRemaining : 0,
-        eta: toAssign[0]?.dist ? Math.round(toAssign[0].dist * 8) : 5,
-        ...(missionBrief && { ai_mission_brief: missionBrief }),
-        ...(aiMatch?.reasoning && { ai_analysis_reason: aiMatch.reasoning }),
-        ...(aiMatch?.suggestedSteps && { ai_suggested_steps: aiMatch.suggestedSteps }),
-        updated_at: serverTimestamp(),
+      const assignRef = doc(collection(db, "emergency_requests", requestId, "assignments"), v.id);
+      batch.set(assignRef, {
+        volunteer_id: v.id,
+        ngo_id: targetNgoId,
+        status: "assigned",
+        is_leader: v.id === leaderId,
+        created_at: serverTimestamp(),
       });
     });
+
+    batch.update(reqRef, {
+      status: "Volunteer assigned",
+      assigned_volunteer_id: leaderId,
+      volunteer_name: leaderName,
+      team_leader_volunteer_id: leaderId,
+      // Merge new IDs into the full list
+      assigned_volunteer_ids: arrayUnion(...newAssignedIds),
+      remaining_volunteers_needed: stillRemaining > 0 ? stillRemaining : 0,
+      eta: toAssign[0]?.dist ? Math.round(toAssign[0].dist * 8) : 5,
+      ...(missionBrief && { ai_mission_brief: missionBrief }),
+      ...(aiMatch?.reasoning && { ai_analysis_reason: aiMatch.reasoning }),
+      ...(aiMatch?.suggestedSteps && { ai_suggested_steps: aiMatch.suggestedSteps }),
+      updated_at: serverTimestamp(),
+    });
+    
+    await batch.commit();
 
     // Notify assigned volunteers
     await Promise.all(
@@ -946,11 +965,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (!vol) return;
 
     // Remove volunteer from assignment subcollection and free them up
-    await runTransaction(db, async (transaction) => {
-      const assignRef = doc(db, "emergency_requests", requestId, "assignments", vol.id);
-      transaction.delete(assignRef);
-      transaction.update(doc(db, "volunteers", vol.id), { available: true, current_task_id: null });
-    });
+    const batch = writeBatch(db);
+    const assignRef = doc(db, "emergency_requests", requestId, "assignments", vol.id);
+    batch.delete(assignRef);
+    batch.update(doc(db, "volunteers", vol.id), { available: true, current_task_id: null });
+    await batch.commit();
 
     // Re-fetch request to get current state
     const reqRef = doc(db, "emergency_requests", requestId);
@@ -1342,6 +1361,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       login,
       register,
       logout,
+      resetPassword,
       setEmergencyMode,
     }),
     [
@@ -1350,7 +1370,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       profile, isAuthenticated, emergencyMode, isAvailable, isToggling,
       followingList, createEmergency, autoAssignVolunteers, handleVolunteerShortage,
       acknowledgeAssignment, acceptRequest, assignVolunteer, volunteerAdvance,
-      completeRequest, rejectTask, citizenFinalize, login, register, logout,
+      completeRequest, rejectTask, citizenFinalize, login, register, logout, resetPassword,
       toggleFollow, toggleAvailable, joinTask, approveVolunteer, rejectVolunteer,
       createNotification,
     ]
