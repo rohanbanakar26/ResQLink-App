@@ -553,8 +553,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       return; // STOP — do not cascade to other NGOs
     }
 
-    const reqLoc = toGeo(reqData.location_lat, reqData.location_lng);
-    if (!reqLoc) return;
+    let reqLoc = toGeo(reqData.location_lat, reqData.location_lng);
+    if (!reqLoc) {
+      console.warn("[AutoAssign] Request lacks location data. Defaulting to fallback location.");
+      reqLoc = { lat: 12.9716, lng: 77.5946 };
+    }
+
 
     // AI ranking (best-effort)
     let aiMatch: any = null;
