@@ -58,9 +58,10 @@ export async function smartAnalyzeRequest(
     const response = await result.response;
     const text = response.text();
     
-    // Clean potential markdown code blocks from the output
-    const jsonString = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(jsonString) as SmartMatchResult;
+    // Clean potential markdown code blocks and extract the JSON object
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("Could not find JSON object in Gemini response");
+    return JSON.parse(match[0]) as SmartMatchResult;
   } catch (error) {
     console.error("Gemini Smart Match Error:", error);
     return null;

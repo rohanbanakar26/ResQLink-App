@@ -62,6 +62,7 @@ export interface EmergencyRequest {
   citizenFeedback: string;
   rating: number | null;
   completedAt?: string | null;
+  last_assigned_at?: number | null;
 }
 
 export interface Volunteer {
@@ -300,6 +301,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
               citizenFeedback: r.citizen_feedback || "",
               rating: r.rating ?? null,
               completedAt: r.completed_at || null,
+              last_assigned_at: r.last_assigned_at || null,
             };
           })
         );
@@ -636,6 +638,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       assigned_volunteer_ids: arrayUnion(...newAssignedIds),
       remaining_volunteers_needed: stillRemaining > 0 ? stillRemaining : 0,
       eta: toAssign[0]?.dist ? Math.round(toAssign[0].dist * 8) : 5,
+      last_assigned_at: Date.now(),
       ...(missionBrief && { ai_mission_brief: missionBrief }),
       ...(aiMatch?.reasoning && { ai_analysis_reason: aiMatch.reasoning }),
       ...(aiMatch?.suggestedSteps && { ai_suggested_steps: aiMatch.suggestedSteps }),
@@ -817,6 +820,103 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       }
     });
   }, [requests]);
+
+  // ── 2-Minute Volunteer Acceptance Timeout Engine (Cascading) ──────────────
+  // Checks if assigned volunteers fail to accept within 2 minutes. Free their 
+  // slots and cascade to the next NGO via `handleVolunteerShortage`.
+  
+  const VOLUNTEER_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+
+  useEffect(() => {
+    if (!requests.length) return;
+
+    const timeOutRequests = requests.filter(
+      (r) =>
+        r.status === "Volunteer assigned" &&
+        r.last_assigned_at &&
+        Date.now() - r.last_assigned_at >= VOLUNTEER_TIMEOUT_MS
+    );
+
+    if (timeOutRequests.length === 0) return;
+
+    timeOutRequests.forEach(async (req) => {
+      try {
+        const reqRef = doc(db, "emergency_requests", req.id);
+        
+        // Atomically claim processing to avoid multiple clients racing
+        const processed = await runTransaction(db, async (transaction) => {
+          const snap = await transaction.get(reqRef);
+          if (!snap.exists()) return false;
+          
+          const data = snap.data();
+          if (data.status !== "Volunteer assigned") return false;
+          
+          // Only process timeout if it hasn't been processed since last_assigned_at
+          if (data.timeout_processed_at && data.timeout_processed_at.toMillis() > (req.last_assigned_at || 0)) {
+            return false;
+          }
+
+          transaction.update(reqRef, {
+            timeout_processed_at: serverTimestamp(),
+          });
+          return true;
+        });
+
+        if (!processed) return;
+
+        console.log(`[TimeoutEngine] 2 minutes passed for request ${req.id}. Checking unacknowledged assignments.`);
+
+        const assignSnap = await getDocs(collection(db, "emergency_requests", req.id, "assignments"));
+        
+        const timedOutVolIds: string[] = [];
+        const batch = writeBatch(db);
+
+        assignSnap.docs.forEach((docSnap) => {
+          const aData = docSnap.data();
+          if (aData.status === "assigned") {
+            const volId = aData.volunteer_id;
+            timedOutVolIds.push(volId);
+            batch.update(doc(db, "volunteers", volId), { available: true, current_task_id: null });
+            batch.delete(docSnap.ref);
+          }
+        });
+
+        if (timedOutVolIds.length === 0) {
+          console.log(`[TimeoutEngine] All assigned volunteers for ${req.id} have successfully accepted.`);
+          return;
+        }
+
+        console.log(`[TimeoutEngine] Volunteers [${timedOutVolIds.join(", ")}] timed out. Freeing slots and escalating.`);
+
+        const reqDoc = await getDoc(reqRef);
+        if (!reqDoc.exists()) return;
+        const reqData = reqDoc.data();
+
+        const currentAssigned = (reqData.assigned_volunteer_ids || []).filter(
+          (vid: string) => !timedOutVolIds.includes(vid)
+        );
+        const totalNeeded = reqData.volunteers_needed || 1;
+        const newRemaining = totalNeeded - currentAssigned.length;
+
+        batch.update(reqRef, {
+          assigned_volunteer_ids: currentAssigned,
+          remaining_volunteers_needed: newRemaining,
+          updated_at: serverTimestamp(),
+        });
+
+        await batch.commit();
+
+        if (newRemaining > 0) {
+          // If the primary NGO has more volunteers available that haven't rejected, we could try them.
+          // However, after 2 minutes, we cascade immediately to nearby NGOs to save time.
+          // Note: `handleVolunteerShortage` delegates to other tracking NGOs.
+          await handleVolunteerShortage(req.id);
+        }
+      } catch (e) {
+        console.warn(`[TimeoutEngine] Transaction conflict or error for ${req.id}:`, e);
+      }
+    });
+  }, [requests, handleVolunteerShortage]);
 
   // ── Create Emergency ──────────────────────────────────────────────────────
 
