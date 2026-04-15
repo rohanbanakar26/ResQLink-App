@@ -519,12 +519,18 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     // Filter: NGO-specific or global
     const alreadyAssigned: string[] = reqData.assigned_volunteer_ids || [];
-    const eligiblePool = isGlobal
+    let eligiblePool = isGlobal
       ? volDataRaw.filter((v: any) => !alreadyAssigned.includes(v.id))
       : volDataRaw.filter(
           (v: any) =>
             v.ngo_memberships?.[targetNgoId] === "approved" && !alreadyAssigned.includes(v.id)
         );
+
+    // Fallback: If strict NGO filtering yields no one, loosen to anyone to heavily prevent request getting stuck
+    if (eligiblePool.length === 0 && !isGlobal) {
+      console.warn(`[AutoAssign] No approved volunteers in NGO ${targetNgoId}. Falling back to ANY volunteer to prevent assignment getting stuck.`);
+      eligiblePool = volDataRaw.filter((v: any) => !alreadyAssigned.includes(v.id));
+    }
 
     if (eligiblePool.length === 0) {
       console.warn(`[AutoAssign] No eligible volunteers in NGO ${targetNgoId}. Notifying NGO admin.`);
