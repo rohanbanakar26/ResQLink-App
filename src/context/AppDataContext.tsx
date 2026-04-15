@@ -599,9 +599,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     const newLeaderCandidate = [...toAssign].sort((a: any, b: any) => b.trustScore - a.trustScore)[0];
     const leaderId =
-      newLeaderCandidate.trustScore > existingLeaderTrust ? newLeaderCandidate.id : existingLeaderId;
+      !existingLeaderId || newLeaderCandidate.trustScore > existingLeaderTrust
+        ? newLeaderCandidate.id
+        : existingLeaderId;
     const leaderName =
-      newLeaderCandidate.trustScore > existingLeaderTrust
+      !existingLeaderId || newLeaderCandidate.trustScore > existingLeaderTrust
         ? newLeaderCandidate.name
         : (volDataRaw.find((v: any) => v.id === existingLeaderId)?.name ?? newLeaderCandidate.name);
 
@@ -655,7 +657,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       updated_at: serverTimestamp(),
     });
     
-    await batch.commit();
+    try {
+      await batch.commit();
+      console.log(`[AutoAssign] Successfully assigned ${toAssign.length} volunteers. Leader: ${leaderName}`);
+    } catch (firebaseErr: any) {
+      console.error("[AutoAssign] FATAL BATCH ERROR. Could not save assignments to database!", firebaseErr);
+      // Fallback: If strict permissions blocked the volunteer doc from being edited, 
+      // it halts everything. We must notify the developer.
+      alert(`Auto-Assign failed to save to database: ${firebaseErr.message}`);
+      return; // Stop execution if batch failed!
+    }
 
     // Notify assigned volunteers
     await Promise.all(
