@@ -185,12 +185,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => {},
+      () => { },
       { enableHighAccuracy: true, timeout: 10000 }
     );
     const watchId = navigator.geolocation.watchPosition(
       (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => {},
+      () => { },
       { enableHighAccuracy: true }
     );
     return () => navigator.geolocation.clearWatch(watchId);
@@ -261,7 +261,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     // 3. Requests
     const requestsRef = collection(db, "emergency_requests");
     let qRequests = query(requestsRef, orderBy("created_at", "desc"));
-    
+
     // Secure scope: Citizens only sync their own requests locally.
     if (profile.role === "citizen") {
       qRequests = query(requestsRef, where("user_id", "==", user.uid), orderBy("created_at", "desc"));
@@ -327,8 +327,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
             skills: Array.isArray(v.skills)
               ? v.skills
               : typeof v.skills === "string"
-              ? v.skills.split(",").map((s: string) => s.trim()).filter(Boolean)
-              : [],
+                ? v.skills.split(",").map((s: string) => s.trim()).filter(Boolean)
+                : [],
             location: toGeo(v.location_lat, v.location_lng),
             available: v.available ?? true,
             trustScore: pData.trust_score ?? 4.5,
@@ -360,7 +360,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
             const pRef = doc(db, "profiles", n.user_id);
             const pSnap = await getDoc(pRef);
             if (pSnap.exists()) pData = pSnap.data();
-          } catch (e) {}
+          } catch (e) { }
           return {
             id: d.id,
             userId: n.user_id,
@@ -522,9 +522,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     let eligiblePool = isGlobal
       ? volDataRaw.filter((v: any) => !alreadyAssigned.includes(v.id))
       : volDataRaw.filter(
-          (v: any) =>
-            v.ngo_memberships?.[targetNgoId] === "approved" && !alreadyAssigned.includes(v.id)
-        );
+        (v: any) =>
+          v.ngo_memberships?.[targetNgoId] === "approved" && !alreadyAssigned.includes(v.id)
+      );
 
     // Fallback: If strict NGO filtering yields no one, loosen to anyone to heavily prevent request getting stuck
     if (eligiblePool.length === 0 && !isGlobal) {
@@ -656,7 +656,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       ...(aiMatch?.suggestedSteps && { ai_suggested_steps: aiMatch.suggestedSteps }),
       updated_at: serverTimestamp(),
     });
-    
+
     try {
       await batch.commit();
       console.log(`[AutoAssign] Successfully assigned ${toAssign.length} volunteers. Leader: ${leaderName}`);
@@ -845,7 +845,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   // ── 2-Minute Volunteer Acceptance Timeout Engine (Cascading) ──────────────
   // Checks if assigned volunteers fail to accept within 2 minutes. Free their 
   // slots and cascade to the next NGO via `handleVolunteerShortage`.
-  
+
   const VOLUNTEER_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
   useEffect(() => {
@@ -863,15 +863,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     timeOutRequests.forEach(async (req) => {
       try {
         const reqRef = doc(db, "emergency_requests", req.id);
-        
+
         // Atomically claim processing to avoid multiple clients racing
         const processed = await runTransaction(db, async (transaction) => {
           const snap = await transaction.get(reqRef);
           if (!snap.exists()) return false;
-          
+
           const data = snap.data();
           if (data.status !== "Volunteer assigned") return false;
-          
+
           // Only process timeout if it hasn't been processed since last_assigned_at
           if (data.timeout_processed_at && data.timeout_processed_at.toMillis() > (req.last_assigned_at || 0)) {
             return false;
@@ -888,7 +888,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         console.log(`[TimeoutEngine] 2 minutes passed for request ${req.id}. Checking unacknowledged assignments.`);
 
         const assignSnap = await getDocs(collection(db, "emergency_requests", req.id, "assignments"));
-        
+
         const timedOutVolIds: string[] = [];
         const batch = writeBatch(db);
 
@@ -987,10 +987,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           createNotification(
             ngo.userId,
             "🚨 New Emergency Request Nearby",
-            `A ${data.urgency} ${data.category} emergency has been reported ${
-              reqLoc && ngo.location
-                ? `~${haversineDistance(reqLoc, ngo.location)?.toFixed(1)} km`
-                : "near"
+            `A ${data.urgency} ${data.category} emergency has been reported ${reqLoc && ngo.location
+              ? `~${haversineDistance(reqLoc, ngo.location)?.toFixed(1)} km`
+              : "near"
             } from your NGO. Open the app to review and accept.`,
             "new_request"
           )
@@ -1381,8 +1380,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           skills: Array.isArray(data.skills)
             ? data.skills
             : typeof data.skills === "string"
-            ? data.skills.split(",").map((s: string) => s.trim()).filter(Boolean)
-            : [],
+              ? data.skills.split(",").map((s: string) => s.trim()).filter(Boolean)
+              : [],
           ngo_memberships: initialMemberships,
           completed_tasks: 0,
           created_at: serverTimestamp(),
@@ -1426,7 +1425,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const targetRef = doc(db, collectionName, targetId);
     if (!snap.empty) {
       await deleteDoc(snap.docs[0].ref);
-      await updateDoc(targetRef, { followers_count: increment(-1) }).catch(() => {});
+      await updateDoc(targetRef, { followers_count: increment(-1) }).catch(() => { });
     } else {
       await addDoc(collection(db, "user_follows"), {
         user_id: user.uid,
@@ -1434,7 +1433,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         type,
         created_at: serverTimestamp(),
       });
-      await updateDoc(targetRef, { followers_count: increment(1) }).catch(() => {});
+      await updateDoc(targetRef, { followers_count: increment(1) }).catch(() => { });
     }
   }, [user]);
 
