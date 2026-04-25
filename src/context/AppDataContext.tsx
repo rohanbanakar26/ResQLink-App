@@ -584,6 +584,18 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       .sort((a: any, b: any) => b.totalScore - a.totalScore);
 
     const toAssign = ranked.slice(0, remaining);
+    
+    // DEBUG LOGS
+    console.log("[AutoAssign DEBUG]", {
+      volunteersInDb: volDataRaw.length,
+      eligiblePoolSize: eligiblePool.length,
+      remainingCount: remaining,
+      rankedLength: ranked.length,
+      toAssignLength: toAssign.length,
+      alreadyAssigned: alreadyAssigned.length,
+      targetNgoId
+    });
+
     if (toAssign.length === 0) {
       // Ranked list was empty after scoring — just stop, no cascade
       console.warn("[AutoAssign] Ranked pool is empty after scoring. Stopping.");
