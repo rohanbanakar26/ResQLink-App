@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Clock, Users, Shield, Zap, ArrowLeft, CheckCircle2, Phone, MessageSquare, AlertTriangle, Play } from "lucide-react";
+import { MapPin, Clock, Users, Shield, Zap, ArrowLeft, CheckCircle2, Phone, MessageSquare, AlertTriangle, Play, Navigation, X } from "lucide-react";
 import { useAppData } from "../../context/AppDataContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,14 +15,27 @@ interface TaskDetailViewProps {
 }
 
 export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProps) {
-  const { requests, volunteers, currentUser, joinTask, isAvailable } = useAppData();
+  const {
+    requests, volunteers, currentUser, joinTask, isAvailable,
+    myAssignmentStatuses, acknowledgeAssignment, rejectTask,
+  } = useAppData() as any;
   const [showServiceMode, setShowServiceMode] = useState(false);
+  const [ackLoading, setAckLoading] = useState(false);
 
-  const request = requests.find((r) => r.id === requestId);
-  const isJoined = request?.assignedVolunteerId === currentUser?.userId || false; 
-  
-  const currentVol = volunteers.find(v => v.userId === currentUser?.userId);
+  const request = requests.find((r: any) => r.id === requestId);
+  const currentVol = volunteers.find((v: any) => v.userId === currentUser?.userId);
+
+  // FIX: Compare volunteer doc IDs (not auth UID) against the full team array
+  const isJoined = currentVol
+    ? (request?.assignedVolunteerIds || []).includes(currentVol.id)
+    : false;
+
   const isLeader = request?.teamLeaderVolunteerId === currentVol?.id;
+
+  // Per-volunteer acceptance status from real-time listener
+  const myStatus = (myAssignmentStatuses || {})[requestId];
+  const hasAccepted = myStatus === "acknowledged";
+  const isPendingAcceptance = isJoined && myStatus === "assigned";
   
   if (!request) return null;
 
@@ -106,7 +119,8 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
              </h3>
              <Card className="bg-muted/5 border-border/50 border-dashed">
                 <CardContent className="p-6 text-center">
-                   {isJoined ? (
+                   {/* ── STATE 1: Accepted — show post-acceptance actions ── */}
+                   {isJoined && hasAccepted ? (
                       <div className="space-y-4 text-left">
                          <div className="flex flex-col items-center text-center">
                             <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mb-3">
@@ -124,16 +138,33 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
                             </p>
                          </div>
                          
+                         {/* Post-acceptance action buttons */}
                          <div className="grid grid-cols-2 gap-3">
                             <Button variant="outline" className="rounded-xl h-12">
-                               <MessageSquare className="w-4 h-4 mr-2" /> Group Chat
+                               <MessageSquare className="w-4 h-4 mr-2" /> Chat with Team
                             </Button>
                             {isLeader && (
                                <Button className="rounded-xl h-12 bg-info hover:bg-info/90">
-                                  <Phone className="w-4 h-4 mr-2" /> Call Citizen
+                                  <Phone className="w-4 h-4 mr-2" /> Chat with Citizen
                                </Button>
                             )}
                          </div>
+
+                         {/* Navigate to location */}
+                         <Button
+                           variant="outline"
+                           className="w-full rounded-xl h-12 border-emergency/30 hover:bg-emergency/5"
+                           onClick={() => {
+                             if (request.location) {
+                               window.open(
+                                 `https://www.google.com/maps/dir/?api=1&destination=${request.location.lat},${request.location.lng}`,
+                                 "_blank"
+                               );
+                             }
+                           }}
+                         >
+                            <Navigation className="w-4 h-4 mr-2 text-emergency" /> Navigate to Location
+                         </Button>
 
                          {/* AI Mission Briefing */}
                          {(request as any).ai_mission_brief && (
@@ -151,6 +182,46 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
                             <Play className="w-5 h-5 mr-2 fill-white" /> Start Service Mode
                          </Button>
                       </div>
+
+                   /* ── STATE 2: Assigned but not yet accepted — show Accept/Decline ── */
+                   ) : isPendingAcceptance ? (
+                      <div className="space-y-4">
+                         <div className="flex flex-col items-center text-center">
+                            <div className="w-16 h-16 rounded-full bg-warning/20 flex items-center justify-center mb-3 animate-pulse">
+                               <AlertTriangle className="w-8 h-8 text-warning" />
+                            </div>
+                            <h4 className="text-lg font-bold text-foreground">Mission Assigned to You</h4>
+                            <p className="text-xs text-muted-foreground mt-1 px-8">
+                               Accept this mission to see team chat, citizen contact, and navigation.
+                            </p>
+                         </div>
+                         <div className="grid grid-cols-2 gap-3">
+                            <Button
+                              variant="outline"
+                              className="h-12 rounded-xl border-border/50 hover:bg-destructive/5 hover:border-destructive/30"
+                              disabled={ackLoading}
+                              onClick={async () => {
+                                setAckLoading(true);
+                                try { await rejectTask(requestId); onBack(); } finally { setAckLoading(false); }
+                              }}
+                            >
+                               <X className="w-4 h-4 mr-2 text-destructive" /> Decline
+                            </Button>
+                            <Button
+                              className="h-12 rounded-xl bg-emergency hover:bg-emergency/90 text-emergency-foreground font-bold shadow-lg shadow-emergency/20"
+                              disabled={ackLoading}
+                              onClick={async () => {
+                                setAckLoading(true);
+                                try { await acknowledgeAssignment(requestId); } finally { setAckLoading(false); }
+                              }}
+                            >
+                               <CheckCircle2 className="w-4 h-4 mr-2" />
+                               {ackLoading ? "Confirming…" : "Accept & Go"}
+                            </Button>
+                         </div>
+                      </div>
+
+                   /* ── STATE 3: Not assigned — show opt-in button ── */
                    ) : (
                       <div className="space-y-4">
                          <div className="inline-flex items-center gap-2 bg-warning/10 px-3 py-1 rounded-full border border-warning/20 mb-2">

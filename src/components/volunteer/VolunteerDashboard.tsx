@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle2, MapPin, Zap, ShieldCheck, Clock, AlertTriangle,
   X, LayoutDashboard, Crown, Shield, Bell, ChevronRight,
+  MessageSquare, Phone, Navigation,
 } from "lucide-react";
 import { useAppData } from "../../context/AppDataContext";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,11 @@ export default function VolunteerDashboard() {
   // not based on what other volunteers have done.
   const pendingAck = (myAssignedRequests || []).filter(
     (r: any) => (myAssignmentStatuses || {})[r.id] === "assigned"
+  );
+
+  // Missions this volunteer has accepted (status === "acknowledged")
+  const acceptedMissions = (myAssignedRequests || []).filter(
+    (r: any) => (myAssignmentStatuses || {})[r.id] === "acknowledged"
   );
 
   async function handleAcknowledge(requestId: string) {
@@ -241,6 +247,123 @@ export default function VolunteerDashboard() {
                           >
                             <CheckCircle2 className="w-4 h-4 mr-2" />
                             {loading ? "Confirming…" : "Accept & Go"}
+                          </Button>
+                        </div>
+
+                        {/* View full details */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full h-8 text-xs text-muted-foreground"
+                          onClick={() => setSelectedTaskId(req.id)}
+                        >
+                          View full mission details <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* ── ACTIVE (ACCEPTED) MISSIONS ─────────────────────────────────────── */}
+      {acceptedMissions.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-black text-foreground flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-success" />
+              Active Missions
+            </h2>
+            <Badge className="bg-success/10 text-success border-success/20 text-[10px]">
+              {acceptedMissions.length} active
+            </Badge>
+          </div>
+
+          <AnimatePresence>
+            {acceptedMissions.map((req: any) => {
+              const cat = getCategoryMeta(req.category);
+              const isLeader = req.teamLeaderVolunteerId === meVol?.id;
+
+              return (
+                <motion.div
+                  key={req.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                >
+                  <Card className="overflow-hidden border-success/20 ring-1 ring-success/10 shadow-sm">
+                    <CardContent className="p-0">
+                      {/* Success strip */}
+                      <div className="h-1.5 w-full bg-success" />
+
+                      <div className="p-4 space-y-3">
+                        {/* Top row */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-11 h-11 rounded-xl bg-muted/30 flex items-center justify-center text-2xl">
+                              {cat.emoji}
+                            </div>
+                            <div>
+                              <h3 className="text-sm font-black text-foreground">{cat.label} Mission</h3>
+                              <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {Math.round((Date.now() - req.createdAt) / 60000)}m ago
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            {isLeader ? (
+                              <Badge className="bg-warning/20 text-warning border-warning/30 text-[8px]">
+                                <Crown className="w-2.5 h-2.5 mr-0.5" /> TEAM LEADER
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-info/10 text-info border-info/20 text-[8px]">
+                                <Shield className="w-2.5 h-2.5 mr-0.5" /> MEMBER
+                              </Badge>
+                            )}
+                            <Badge className="bg-success/10 text-success border-success/20 text-[8px] font-black">
+                              ACCEPTED
+                            </Badge>
+                          </div>
+                        </div>
+
+                        {/* Description */}
+                        <p className="text-sm text-foreground/80 line-clamp-2 leading-relaxed">
+                          {req.description}
+                        </p>
+
+                        {/* Post-acceptance action buttons */}
+                        <div className={`grid ${isLeader ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+                          <Button
+                            variant="outline"
+                            className="h-11 rounded-xl border-border/50 hover:bg-info/5 hover:border-info/30 transition-colors"
+                          >
+                            <MessageSquare className="w-4 h-4 mr-1.5" /> Chat with Team
+                          </Button>
+                          {isLeader && (
+                            <Button
+                              className="h-11 rounded-xl bg-info hover:bg-info/90 text-white transition-colors"
+                            >
+                              <Phone className="w-4 h-4 mr-1.5" /> Chat with Citizen
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            className="h-11 rounded-xl border-emergency/30 hover:bg-emergency/5 transition-colors"
+                            onClick={() => {
+                              if (req.location) {
+                                window.open(
+                                  `https://www.google.com/maps/dir/?api=1&destination=${req.location.lat},${req.location.lng}`,
+                                  "_blank"
+                                );
+                              }
+                            }}
+                          >
+                            <Navigation className="w-4 h-4 mr-1.5 text-emergency" /> Navigate
                           </Button>
                         </div>
 
