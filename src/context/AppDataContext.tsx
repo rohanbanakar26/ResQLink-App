@@ -474,8 +474,17 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     // How many slots still need to be filled?
     const currentlyAssigned = (reqData.assigned_volunteer_ids || []).length;
-    const totalNeeded = reqData.volunteers_needed || 1;
-    const remaining = reqData.remaining_volunteers_needed ?? (totalNeeded - currentlyAssigned);
+    
+    // Safely parse volunteers_needed, handling ranges like "1-5" by taking the max (5)
+    const rawTotalNeeded = String(reqData.volunteers_needed || "1").split("-").pop() || "1";
+    const totalNeeded = parseInt(rawTotalNeeded, 10) || 1;
+
+    // Safely parse remaining_volunteers_needed using the same logic
+    const rawRemaining = reqData.remaining_volunteers_needed !== undefined 
+      ? String(reqData.remaining_volunteers_needed).split("-").pop() || String(totalNeeded - currentlyAssigned)
+      : String(totalNeeded - currentlyAssigned);
+    
+    const remaining = parseInt(rawRemaining, 10) || (totalNeeded - currentlyAssigned);
 
     if (remaining <= 0) {
       console.log("[AutoAssign] Team is already fully staffed.");
