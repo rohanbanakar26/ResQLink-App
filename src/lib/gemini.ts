@@ -19,8 +19,10 @@ export async function smartAnalyzeRequest(
   request: { category: string; urgency: string; description: string },
   volunteers: { id: string; name: string; skills: string[]; trustScore: number }[]
 ): Promise<SmartMatchResult | null> {
-  if (!import.meta.env.VITE_GEMINI_API_KEY) {
-    console.warn("Gemini API key missing. Skipping AI analysis.");
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  // Guard: skip if key is missing OR doesn't look like a real Gemini key (valid keys start with "AIza")
+  if (!apiKey || !apiKey.startsWith("AIza")) {
+    console.warn("[Gemini] API key missing or invalid. Skipping AI analysis and using fallback scoring.");
     return null;
   }
 
@@ -54,16 +56,22 @@ export async function smartAnalyzeRequest(
       }
     `;
 
-    const result = await model.generateContent(prompt);
+    // Race the API call against a 5-second timeout so an invalid key / slow network
+    // can never block the autoAssignVolunteers pipeline indefinitely.
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("[Gemini] API call timed out after 5s")), 5000)
+    );
+
+    const result = await Promise.race([model.generateContent(prompt), timeoutPromise]);
     const response = await result.response;
     const text = response.text();
-    
+
     // Clean potential markdown code blocks and extract the JSON object
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) throw new Error("Could not find JSON object in Gemini response");
     return JSON.parse(match[0]) as SmartMatchResult;
   } catch (error) {
-    console.error("Gemini Smart Match Error:", error);
+    console.error("[Gemini] Smart Match Error — falling back to proximity+trust scoring:", error);
     return null;
   }
 }

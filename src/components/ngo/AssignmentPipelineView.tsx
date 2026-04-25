@@ -40,11 +40,18 @@ const PIPELINE_STEPS = [
 
 function getStepIndex(status: string): number {
   if (status === "Created" || status === "Requested") return -1;
-  if (status === "Accepted") return 1;
-  if (status === "Awaiting more volunteers") return 2;
+  // "Accepted" means NGO accepted + system is actively running ranking & assignment
+  if (status === "Accepted") return 2;
+  // "Escalating" means ranking ran but timed out, now escalating globally
+  if (status === "Escalating") return 2;
+  // "Awaiting more volunteers" means ranking done, shortage cascade is active
+  if (status === "Awaiting more volunteers") return 3;
+  // Once volunteers are assigned, all steps are complete
   if (status === "Volunteer assigned") return 5;
   if (status === "On the way" || status === "In progress") return 5;
-  return 3;
+  if (status === "Completed") return 5;
+  // Default fallback for any unexpected intermediate state
+  return 2;
 }
 
 export default function AssignmentPipelineView({ request, onClose }: Props) {
