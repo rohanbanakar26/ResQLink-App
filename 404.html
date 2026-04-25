@@ -1,28 +1,26 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
   <head>
-    <meta charset="utf-8">
-    <title>ResQLink Redirecting...</title>
-    <script type="text/javascript">
-      // GitHub Pages SPA Hero Script
-      // https://github.com/rafgraph/spa-github-pages
-      var pathSegmentsToKeep = 1;
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- TODO: Set the document title to the name of your application -->
+    <title>ResQLink — Real-time Emergency Response Network</title>
+    <meta name="description" content="Citizens report emergencies, NGOs coordinate, volunteers respond — all from one live map and request stream." />
+    <meta name="author" content="ResQLink" />
 
-      var l = window.location;
-      l.replace(
-        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
-        l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?p=/' +
-        l.pathname.split('/').slice(1 + pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
-        (l.search ? '&q=' + l.search.slice(1).replace(/&/g, '~and~') : '') +
-        l.hash
-      );
-    </script>
+    <meta property="og:title" content="ResQLink — Emergency Response Network" />
+    <meta property="og:description" content="Real-time NGO resource intelligence and volunteer allocation system." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@Lovable" />
+    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <script type="module" crossorigin src="/ResQLink-App/assets/index-CTD8Db_K.js"></script>
+    <link rel="stylesheet" crossorigin href="/ResQLink-App/assets/index-mp-Gzo8D.css">
   </head>
+
   <body>
-    <div style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; color: #666;">
-       <div style="width: 40px; height: 40px; border: 4px solid #eee; border-top-color: #f43f5e; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-       <p style="margin-top: 20px; font-weight: bold;">Loading ResQLink...</p>
-    </div>
-    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    <div id="root"></div>
   </body>
 </html>
