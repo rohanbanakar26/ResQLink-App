@@ -119,6 +119,8 @@ interface AppDataContextValue {
   myRequests: EmergencyRequest[];
   /** Auto-assigned missions for the currently logged-in volunteer */
   myAssignedRequests: EmergencyRequest[];
+  /** Per-volunteer assignment status map: requestId → assignment status (e.g. "assigned", "acknowledged") */
+  myAssignmentStatuses: Record<string, string>;
   volunteers: Volunteer[];
   ngos: Ngo[];
   priorityZones: any[];
@@ -177,6 +179,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [dataLoading, setDataLoading] = useState(true);
   const [followingList, setFollowingList] = useState<string[]>([]);
   const [location, setLocation] = useState<GeoPoint | null>(FALLBACK_LOCATION);
+  /** Per-volunteer assignment status: maps requestId → this volunteer's assignment status */
+  const [myAssignmentStatuses, setMyAssignmentStatuses] = useState<Record<string, string>>({});
 
   const isAuthenticated = user !== null;
 
@@ -420,6 +424,53 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, [requests, profile, user, volunteers]);
 
   const priorityZones = useMemo(() => buildPriorityZones([], requests), [requests]);
+
+  // ── Real-time listener for this volunteer's assignment statuses ────────
+  // Subscribes to the assignment subdocument for each request this volunteer
+  // is part of. Each volunteer independently tracks their own status.
+  useEffect(() => {
+    if (!profile || profile.role !== "volunteer" || !user) {
+      setMyAssignmentStatuses({});
+      return;
+    }
+    const vol = volunteers.find((v) => v.userId === user.uid);
+    if (!vol) {
+      setMyAssignmentStatuses({});
+      return;
+    }
+
+    // Get the request IDs this volunteer is assigned to
+    const assignedRequestIds = requests
+      .filter((r) => (r.assignedVolunteerIds || []).includes(vol.id))
+      .map((r) => r.id);
+
+    if (assignedRequestIds.length === 0) {
+      setMyAssignmentStatuses({});
+      return;
+    }
+
+    // Listen to each assignment subdoc for this volunteer
+    const unsubscribes = assignedRequestIds.map((reqId) => {
+      const assignRef = doc(db, "emergency_requests", reqId, "assignments", vol.id);
+      return onSnapshot(assignRef, (snap) => {
+        if (snap.exists()) {
+          setMyAssignmentStatuses((prev) => ({
+            ...prev,
+            [reqId]: snap.data().status || "assigned",
+          }));
+        } else {
+          // Assignment was deleted (e.g. timeout/rejection)
+          setMyAssignmentStatuses((prev) => {
+            const next = { ...prev };
+            delete next[reqId];
+            return next;
+          });
+        }
+      });
+    });
+
+    return () => unsubscribes.forEach((unsub) => unsub());
+  }, [profile, user, volunteers, requests]);
 
   // ── Notification helper ───────────────────────────────────────────────────
 
@@ -1233,28 +1284,68 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   /**
    * Volunteer formally acknowledges their auto-assigned mission.
-   * Changes assignment status: "assigned" → "acknowledged"
-   * Changes request status: → "On the way"
+   *
+   * Per-volunteer isolation:
+   * 1. Updates ONLY this volunteer's assignment subdoc: "assigned" → "acknowledged"
+   * 2. Checks if ALL assigned volunteers have now acknowledged
+   * 3. Only then promotes the request status to "On the way" (via transaction)
+   *
+   * This ensures one volunteer accepting does NOT affect other volunteers' views.
    */
   const acknowledgeAssignment = useCallback(async (requestId: string) => {
     if (!profile || profile.role !== "volunteer" || !user) return;
     const vol = volunteers.find((v) => v.userId === user.uid);
     if (!vol) return;
 
+    // Step 1: Update only THIS volunteer's assignment status
     const assignRef = doc(db, "emergency_requests", requestId, "assignments", vol.id);
     await updateDoc(assignRef, {
       status: "acknowledged",
       acknowledged_at: serverTimestamp(),
     });
 
-    await updateDoc(doc(db, "emergency_requests", requestId), {
-      status: "On the way",
-      updated_at: serverTimestamp(),
-    });
-
+    // Confirm volunteer is on this task
     await updateDoc(doc(db, "volunteers", vol.id), {
       current_task_id: requestId,
     });
+
+    // Step 2: Check if ALL assigned volunteers have acknowledged.
+    // Use a transaction to prevent race conditions when multiple volunteers
+    // accept simultaneously — only one client will promote the status.
+    const reqRef = doc(db, "emergency_requests", requestId);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const reqSnap = await transaction.get(reqRef);
+        if (!reqSnap.exists()) return;
+        const reqData = reqSnap.data();
+
+        // Don't promote if already past "Volunteer assigned" stage
+        if (reqData.status !== "Volunteer assigned" && reqData.status !== "Awaiting more volunteers") {
+          return;
+        }
+
+        // Read all assignment subdocs for this request
+        const assignmentsSnap = await getDocs(
+          collection(db, "emergency_requests", requestId, "assignments")
+        );
+
+        const allAcknowledged = assignmentsSnap.docs.every(
+          (d) => d.data().status === "acknowledged"
+        );
+
+        if (allAcknowledged && assignmentsSnap.docs.length > 0) {
+          // All volunteers have accepted → promote request status
+          transaction.update(reqRef, {
+            status: "On the way",
+            updated_at: serverTimestamp(),
+          });
+        }
+      });
+    } catch (e) {
+      // Transaction conflicts are expected when multiple volunteers accept
+      // simultaneously — safe to ignore (one client will win the promotion)
+      console.warn("[AckAssignment] Status promotion transaction conflict (safe to ignore):", e);
+    }
   }, [profile, user, volunteers]);
 
   // ── Badge check ───────────────────────────────────────────────────────────
@@ -1573,6 +1664,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       nearbyRequests,
       myRequests,
       myAssignedRequests,
+      myAssignmentStatuses,
       volunteers,
       ngos,
       priorityZones,
@@ -1606,7 +1698,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }),
     [
       authLoading, dataLoading, requests, activeRequests, nearbyRequests,
-      myRequests, myAssignedRequests, volunteers, ngos, priorityZones,
+      myRequests, myAssignedRequests, myAssignmentStatuses, volunteers, ngos, priorityZones,
       profile, isAuthenticated, emergencyMode, isAvailable, isToggling,
       followingList, createEmergency, autoAssignVolunteers, handleVolunteerShortage,
       acknowledgeAssignment, acceptRequest, assignVolunteer, volunteerAdvance,

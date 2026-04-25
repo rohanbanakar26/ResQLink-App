@@ -17,7 +17,7 @@ export default function VolunteerDashboard() {
   const {
     isAvailable, isToggling, toggleAvailable,
     nearbyRequests, activeRequests,
-    myAssignedRequests, currentUser, volunteers, user,
+    myAssignedRequests, myAssignmentStatuses, currentUser, volunteers, user,
     acknowledgeAssignment, rejectTask,
   } = useAppData() as any;
 
@@ -34,8 +34,11 @@ export default function VolunteerDashboard() {
   }
 
   // ── My Auto-Assigned Missions ──────────────────────────────────────────
+  // FIX: Use per-volunteer assignment status instead of request-level status.
+  // Each volunteer sees "pending" only when THEIR OWN assignment is "assigned",
+  // not based on what other volunteers have done.
   const pendingAck = (myAssignedRequests || []).filter(
-    (r: any) => r.status === "Volunteer assigned" || r.status === "Awaiting more volunteers"
+    (r: any) => (myAssignmentStatuses || {})[r.id] === "assigned"
   );
 
   async function handleAcknowledge(requestId: string) {
