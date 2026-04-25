@@ -4230,7 +4230,7 @@ Content-Type: `+c.contentType+`\r
       - Description: "${t.description}"
 
       VOLUNTEERS:
-      ${e.map(c=>`- ID ${c.id}: ${c.name} (Skills: ${c.skills.join(", ")}, Trust: ${c.trustScore})`).join(`
+      ${e.map(c=>`- ID ${c.id}: ${c.name} (Skills: ${(Array.isArray(c.skills)?c.skills:[]).join(", ")}, Trust: ${c.trustScore})`).join(`
 `)}
 
       INSTRUCTIONS:
