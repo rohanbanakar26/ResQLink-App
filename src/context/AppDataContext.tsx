@@ -475,19 +475,24 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     // How many slots still need to be filled?
     const currentlyAssigned = (reqData.assigned_volunteer_ids || []).length;
     
-    // Safely parse volunteers_needed, handling ranges like "1-5" by taking the max (5)
-    const rawTotalNeeded = String(reqData.volunteers_needed || "1").split("-").pop() || "1";
-    const totalNeeded = parseInt(rawTotalNeeded, 10) || 1;
+    // Safely parse range. Take min as the hard requirement, max as ideal requirement.
+    const rangeParts = String(reqData.volunteers_needed || "1").replace("+", "").split("-");
+    const minNeeded = parseInt(rangeParts[0], 10) || 1;
+    const maxNeeded = rangeParts.length > 1 ? (parseInt(rangeParts[1], 10) || minNeeded) : minNeeded;
 
-    // Safely parse remaining_volunteers_needed using the same logic
-    const rawRemaining = reqData.remaining_volunteers_needed !== undefined 
-      ? String(reqData.remaining_volunteers_needed).split("-").pop() || String(totalNeeded - currentlyAssigned)
-      : String(totalNeeded - currentlyAssigned);
-    
-    const remaining = parseInt(rawRemaining, 10) || (totalNeeded - currentlyAssigned);
+    let remainingToMax = maxNeeded - currentlyAssigned;
 
-    if (remaining <= 0) {
-      console.log("[AutoAssign] Team is already fully staffed.");
+    if (typeof reqData.remaining_volunteers_needed !== "undefined" && reqData.remaining_volunteers_needed !== null) {
+       const storedRemaining = parseInt(String(reqData.remaining_volunteers_needed).split("-").pop() || "0", 10) || 0;
+       if (storedRemaining <= 0) {
+         console.log("[AutoAssign] Team is already fully staffed (minimum requirement met).");
+         return;
+       }
+       remainingToMax = Math.min(storedRemaining, maxNeeded - currentlyAssigned);
+    }
+
+    if (remainingToMax <= 0) {
+      console.log("[AutoAssign] Team is already fully staffed at max capacity.");
       return;
     }
 
@@ -592,13 +597,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       })
       .sort((a: any, b: any) => b.totalScore - a.totalScore);
 
-    const toAssign = ranked.slice(0, remaining);
+    const toAssign = ranked.slice(0, remainingToMax);
     
     // DEBUG LOGS
     console.log("[AutoAssign DEBUG]", {
       volunteersInDb: volDataRaw.length,
       eligiblePoolSize: eligiblePool.length,
-      remainingCount: remaining,
+      remainingCount: remainingToMax,
       rankedLength: ranked.length,
       toAssignLength: toAssign.length,
       alreadyAssigned: alreadyAssigned.length,
@@ -643,7 +648,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }
 
     const newAssignedIds = toAssign.map((v: any) => v.id);
-    const stillRemaining = remaining - toAssign.length;
+    const totalAssignedNow = currentlyAssigned + toAssign.length;
+    let nextRemainingVal = 0;
+    if (totalAssignedNow < minNeeded) {
+      nextRemainingVal = minNeeded - totalAssignedNow;
+    } else {
+      nextRemainingVal = 0; // Minimum requirement met, mark as fully staffed!
+    }
 
     // Atomic Firestore write
     const batch = writeBatch(db);
@@ -669,7 +680,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       team_leader_volunteer_id: leaderId,
       // Merge new IDs into the full list
       assigned_volunteer_ids: arrayUnion(...newAssignedIds),
-      remaining_volunteers_needed: stillRemaining > 0 ? stillRemaining : 0,
+      remaining_volunteers_needed: nextRemainingVal,
       eta: toAssign[0]?.dist ? Math.round(toAssign[0].dist * 8) : 5,
       last_assigned_at: Date.now(),
       ...(missionBrief && { ai_mission_brief: missionBrief }),
@@ -707,11 +718,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     // Cascade to other NGOs only happens when a volunteer ACTIVELY REJECTS
     // their assignment (handled in rejectTask below).
     // This gives the primary NGO's volunteers a real chance to accept first.
-    if (stillRemaining > 0 && !isGlobal) {
-      console.log(`[AutoAssign] ${stillRemaining} slot(s) open in NGO ${targetNgoId}. Waiting for volunteer responses before cascading.`);
+    if (nextRemainingVal > 0 && !isGlobal) {
+      console.log(`[AutoAssign] ${nextRemainingVal} slot(s) short of minimum in NGO ${targetNgoId}. Waiting for volunteer responses before cascading.`);
       // Just update the remaining count — no cascade yet
       await updateDoc(reqRef, {
-        remaining_volunteers_needed: stillRemaining,
+        remaining_volunteers_needed: nextRemainingVal,
         updated_at: serverTimestamp(),
       });
     }
@@ -735,8 +746,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const reqData = reqSnap.data();
 
     const currentlyAssigned = (reqData.assigned_volunteer_ids || []).length;
-    const totalNeeded = reqData.volunteers_needed || 1;
-    const remaining = reqData.remaining_volunteers_needed ?? (totalNeeded - currentlyAssigned);
+    const parts = String(reqData.volunteers_needed || "1").replace("+", "").split("-");
+    const minNeeded = parseInt(parts[0], 10) || 1;
+    
+    let remaining = 0;
+    if (reqData.remaining_volunteers_needed !== undefined && reqData.remaining_volunteers_needed !== null) {
+      const remainingStr = String(reqData.remaining_volunteers_needed).split("-").pop() || "0";
+      remaining = parseInt(remainingStr, 10) || 0;
+    } else {
+      if (currentlyAssigned < minNeeded) remaining = minNeeded - currentlyAssigned;
+    }
 
     if (remaining <= 0) {
       console.log("[Shortage] Team is fully staffed. No cascade needed.");
@@ -867,14 +886,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   // Checks if assigned volunteers fail to accept within 2 minutes. Free their 
   // slots and cascade to the next NGO via `handleVolunteerShortage`.
 
-  const VOLUNTEER_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+  const VOLUNTEER_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
   useEffect(() => {
     if (!requests.length) return;
 
     const timeOutRequests = requests.filter(
       (r) =>
-        r.status === "Volunteer assigned" &&
+        (r.status === "Volunteer assigned" || r.status === "On the way" || r.status === "In Progress") &&
         r.last_assigned_at &&
         Date.now() - r.last_assigned_at >= VOLUNTEER_TIMEOUT_MS
     );
@@ -891,7 +910,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           if (!snap.exists()) return false;
 
           const data = snap.data();
-          if (data.status !== "Volunteer assigned") return false;
+          if (!["Volunteer assigned", "On the way", "In Progress"].includes(data.status)) return false;
 
           // Only process timeout if it hasn't been processed since last_assigned_at
           if (data.timeout_processed_at && data.timeout_processed_at.toMillis() > (req.last_assigned_at || 0)) {
@@ -906,7 +925,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
         if (!processed) return;
 
-        console.log(`[TimeoutEngine] 2 minutes passed for request ${req.id}. Checking unacknowledged assignments.`);
+        console.log(`[TimeoutEngine] 5 minutes passed for request ${req.id}. Checking unacknowledged assignments.`);
 
         const assignSnap = await getDocs(collection(db, "emergency_requests", req.id, "assignments"));
 
@@ -937,21 +956,49 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         const currentAssigned = (reqData.assigned_volunteer_ids || []).filter(
           (vid: string) => !timedOutVolIds.includes(vid)
         );
-        const totalNeeded = reqData.volunteers_needed || 1;
-        const newRemaining = totalNeeded - currentAssigned.length;
+        const parts = String(reqData.volunteers_needed || "1").replace("+", "").split("-");
+        const minNeeded = parseInt(parts[0], 10) || 1;
+        let newRemaining = 0;
+        if (currentAssigned.length < minNeeded) {
+           newRemaining = minNeeded - currentAssigned.length;
+        }
+
+        let leaderUpdate: any = {};
+        if (timedOutVolIds.includes(reqData.team_leader_volunteer_id) && currentAssigned.length > 0) {
+           leaderUpdate = { team_leader_volunteer_id: currentAssigned[0], assigned_volunteer_id: currentAssigned[0] };
+        }
 
         batch.update(reqRef, {
           assigned_volunteer_ids: currentAssigned,
           remaining_volunteers_needed: newRemaining,
           updated_at: serverTimestamp(),
+          ...leaderUpdate
         });
 
         await batch.commit();
 
         if (newRemaining > 0) {
-          // If the primary NGO has more volunteers available that haven't rejected, we could try them.
-          // However, after 2 minutes, we cascade immediately to nearby NGOs to save time.
-          // Note: `handleVolunteerShortage` delegates to other tracking NGOs.
+          // ── STEP 1: Try to refill from the primary NGO first ─────────────────
+          const primaryNgoId = reqData.ngo_id;
+          if (primaryNgoId) {
+            const vSnap = await getDocs(query(collection(db, "volunteers")));
+            const sameNgoPool = vSnap.docs.filter((d) => {
+              const memberships = d.data().ngo_memberships || {};
+              return (
+                memberships[primaryNgoId] === "approved" &&
+                !currentAssigned.includes(d.id) &&
+                !timedOutVolIds.includes(d.id)
+              );
+            });
+
+            if (sameNgoPool.length > 0) {
+              console.log(`[TimeoutEngine] Primary NGO (${primaryNgoId}) has ${sameNgoPool.length} more member(s). Refilling from same NGO.`);
+              await autoAssignVolunteers(req.id, primaryNgoId);
+              return;
+            }
+          }
+          
+          // ── STEP 2: Cascade if primary NGO is exhausted ───────────────
           await handleVolunteerShortage(req.id);
         }
       } catch (e) {
@@ -1122,13 +1169,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const currentAssigned = (reqData.assigned_volunteer_ids || []).filter(
       (vid: string) => vid !== vol.id
     );
-    const totalNeeded = reqData.volunteers_needed || 1;
-    const newRemaining = totalNeeded - currentAssigned.length;
+    const parts = String(reqData.volunteers_needed || "1").replace("+", "").split("-");
+    const minNeeded = parseInt(parts[0], 10) || 1;
+    let newRemaining = 0;
+    if (currentAssigned.length < minNeeded) {
+        newRemaining = minNeeded - currentAssigned.length;
+    }
+
+    let leaderUpdate: any = {};
+    if (reqData.team_leader_volunteer_id === vol.id && currentAssigned.length > 0) {
+        leaderUpdate = { team_leader_volunteer_id: currentAssigned[0], assigned_volunteer_id: currentAssigned[0] };
+    }
 
     await updateDoc(reqRef, {
       assigned_volunteer_ids: currentAssigned,
       remaining_volunteers_needed: newRemaining,
       updated_at: serverTimestamp(),
+      ...leaderUpdate
     });
 
     if (newRemaining <= 0) {
