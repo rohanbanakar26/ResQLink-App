@@ -1323,14 +1323,56 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   // ── Remaining CRUD actions ────────────────────────────────────────────────
 
   const assignVolunteer = useCallback(async (requestId: string, volunteerId: string) => {
-    await updateDoc(doc(db, "emergency_requests", requestId), {
+    const userNgo = ngos.find((n) => n.userId === user?.uid);
+    const targetNgoId = userNgo?.id || "";
+
+    const batch = writeBatch(db);
+    
+    // 1. Update the emergency request
+    const reqRef = doc(db, "emergency_requests", requestId);
+    batch.update(reqRef, {
       status: "Volunteer assigned",
       assigned_volunteer_id: volunteerId,
       team_leader_volunteer_id: volunteerId,
       assigned_volunteer_ids: arrayUnion(volunteerId),
       updated_at: serverTimestamp(),
     });
-  }, []);
+
+    // 2. Update the volunteer's availability
+    const volRef = doc(db, "volunteers", volunteerId);
+    batch.update(volRef, {
+      available: false,
+      current_task_id: requestId,
+    });
+
+    // 3. Create the assignment sub-document
+    const assignRef = doc(collection(db, "emergency_requests", requestId, "assignments"), volunteerId);
+    batch.set(assignRef, {
+      volunteer_id: volunteerId,
+      ngo_id: targetNgoId,
+      status: "assigned",
+      is_leader: true,
+      created_at: serverTimestamp(),
+    });
+
+    try {
+      await batch.commit();
+      
+      // 4. Notify the volunteer
+      const vSnap = await getDoc(volRef);
+      if (vSnap.exists()) {
+        await createNotification(
+          vSnap.data().user_id,
+          "🚨 New Mission Assigned",
+          "You've been manually dispatched. Check your dashboard.",
+          "request_accepted"
+        );
+      }
+    } catch (e) {
+      console.error("[assignVolunteer] Failed to manually assign:", e);
+      alert("Failed to assign volunteer: Permissions error.");
+    }
+  }, [ngos, user, createNotification]);
 
   const volunteerAdvance = useCallback(async (requestId: string, status: string) => {
     await updateDoc(doc(db, "emergency_requests", requestId), { status, updated_at: serverTimestamp() });
