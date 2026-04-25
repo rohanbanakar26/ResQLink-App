@@ -37,7 +37,7 @@ export async function smartAnalyzeRequest(
       - Description: "${request.description}"
 
       VOLUNTEERS:
-      ${volunteers.map(v => `- ID ${v.id}: ${v.name} (Skills: ${v.skills.join(", ")}, Trust: ${v.trustScore})`).join("\n")}
+      ${volunteers.map(v => `- ID ${v.id}: ${v.name} (Skills: ${(Array.isArray(v.skills) ? v.skills : []).join(", ")}, Trust: ${v.trustScore})`).join("\n")}
 
       INSTRUCTIONS:
       1. Determine the "Required Skills" based on the description (e.g., medical, rescue, coordination).
