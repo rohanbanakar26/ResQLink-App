@@ -16,6 +16,7 @@ interface CompletionFlowProps {
   onCitizenApprove: () => Promise<void>;
   onCitizenReject: () => Promise<void>;
   onRate: () => void;
+  hasRated?: boolean;
 }
 
 export default function CompletionFlow({
@@ -28,6 +29,7 @@ export default function CompletionFlow({
   onCitizenApprove,
   onCitizenReject,
   onRate,
+  hasRated = false,
 }: CompletionFlowProps) {
   const [uploading, setUploading] = useState(false);
   const [files, setFiles] = useState<string[]>(completionProofs);
@@ -147,9 +149,16 @@ export default function CompletionFlow({
   if (citizenApproved === true) {
     return (
       <Card className="border-success/30 bg-success/5">
-        <CardContent className="p-3 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-success" />
-          <p className="text-sm text-success font-medium">Citizen approved ✓</p>
+        <CardContent className="p-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-success" />
+            <p className="text-sm text-success font-medium">Citizen approved ✓</p>
+          </div>
+          {!hasRated && (
+             <Button size="sm" variant="outline" className="text-success border-success/30" onClick={onRate}>
+               Rate Experience
+             </Button>
+          )}
         </CardContent>
       </Card>
     );

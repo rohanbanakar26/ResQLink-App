@@ -36,7 +36,8 @@ export default function TaskDetailView({ requestId, onBack }: TaskDetailViewProp
   const myStatus = (myAssignmentStatuses || {})[requestId];
   const hasAccepted = myStatus === "acknowledged";
   const isPendingAcceptance = isJoined && myStatus === "assigned";
-  
+  const isLive = request?.status !== "Completed" && request?.status !== "Cancelled";
+
   if (!request) return null;
 
   if (showServiceMode) {

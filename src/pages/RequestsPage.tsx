@@ -22,7 +22,7 @@ export default function RequestsPage() {
   const {
     currentUser, isAuthenticated, location, requests, nearbyRequests,
     myRequests, volunteers, acceptRequest, assignVolunteer, volunteerAdvance, completeRequest,
-    rejectTask, citizenFinalize,
+    rejectTask, citizenFinalize, myAssignedRequests, rateTask
   } = useAppData();
   const [ratingRequest, setRatingRequest] = useState<string | null>(null);
   const [reportRequest, setReportRequest] = useState<string | null>(null);
@@ -36,19 +36,19 @@ export default function RequestsPage() {
   const userId = currentUser?.userId;
 
   const activeRequests = useMemo(() => {
-    const source = role === "citizen" ? myRequests : nearbyRequests;
-    return source.filter((r) => !declinedRequests.has(r.id) && r.status !== "Completed" && r.status !== "Cancelled");
-  }, [role, myRequests, nearbyRequests, declinedRequests]);
+    const source = role === "citizen" || role === "ngo" ? myRequests : myAssignedRequests;
+    return source.filter((r: any) => !declinedRequests.has(r.id) && r.status !== "Completed" && r.status !== "Cancelled");
+  }, [role, myRequests, myAssignedRequests, declinedRequests]);
 
   const completedRequests = useMemo(() => {
-    const source = role === "citizen" ? myRequests : nearbyRequests;
-    return source.filter((r) => r.status === "Completed");
-  }, [role, myRequests, nearbyRequests]);
+    const source = role === "citizen" || role === "ngo" ? myRequests : myAssignedRequests;
+    return source.filter((r: any) => r.status === "Completed");
+  }, [role, myRequests, myAssignedRequests]);
 
   const cancelledRequests = useMemo(() => {
-    const source = role === "citizen" ? myRequests : nearbyRequests;
-    return source.filter((r) => r.status === "Cancelled");
-  }, [role, myRequests, nearbyRequests]);
+    const source = role === "citizen" || role === "ngo" ? myRequests : myAssignedRequests;
+    return source.filter((r: any) => r.status === "Cancelled");
+  }, [role, myRequests, myAssignedRequests]);
 
   const totalPeopleHelped = completedRequests.length * 5; 
   const successRate = myRequests.length > 0
@@ -184,6 +184,7 @@ export default function RequestsPage() {
                 isCitizen={isCitizen}
                 completionProofs={req.completionProofUrls || []}
                 citizenApproved={req.citizenApproved ?? null}
+                hasRated={role === "citizen" ? !!req.ratingByCitizen : !!req.ratingByVolunteer}
                 onUploadProofs={async (urls) => {
                   await handleUploadProofs(req.id, urls);
                   if (req.status !== "Verification Pending") {
@@ -364,13 +365,11 @@ export default function RequestsPage() {
 
       <RatingModal
         open={ratingRequest !== null}
+        role={role as any}
         onSubmit={async (rating, feedback) => {
           if (ratingRequest) {
-            await updateDoc(doc(db, "emergency_requests", ratingRequest), {
-               rating,
-               citizen_feedback: feedback,
-               updated_at: serverTimestamp()
-            });
+            await rateTask(ratingRequest, rating, feedback, role);
+            setRatingRequest(null);
           }
         }}
         onClose={() => setRatingRequest(null)}

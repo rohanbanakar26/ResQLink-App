@@ -39,12 +39,12 @@ export default function VolunteerDashboard() {
   // Each volunteer sees "pending" only when THEIR OWN assignment is "assigned",
   // not based on what other volunteers have done.
   const pendingAck = (myAssignedRequests || []).filter(
-    (r: any) => (myAssignmentStatuses || {})[r.id] === "assigned"
+    (r: any) => (myAssignmentStatuses || {})[r.id] === "assigned" && r.status !== "Completed" && r.status !== "Cancelled"
   );
 
   // Missions this volunteer has accepted (status === "acknowledged")
   const acceptedMissions = (myAssignedRequests || []).filter(
-    (r: any) => (myAssignmentStatuses || {})[r.id] === "acknowledged"
+    (r: any) => (myAssignmentStatuses || {})[r.id] === "acknowledged" && r.status !== "Completed" && r.status !== "Cancelled"
   );
 
   async function handleAcknowledge(requestId: string) {

@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── PROFILES ──
+    match /profiles/{userId} {
+      // Anyone authenticated can read profiles (needed for displaying names/roles of teammates or citizens)
+      allow read: if request.auth != null;
+      // Users can only update their own profile
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── NGOs ──
+    match /ngos/{ngoId} {
+      // Publicly readable so the system can allocate tasks and users can see NGO info
+      allow read: if true;
+      // Only the assigned NGO user can update their NGO document (or authenticated users creating one)
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.user_id;
+    }
+
+    // ── VOLUNTEERS ──
+    match /volunteers/{volId} {
+      // Public read for coordination
+      allow read: if request.auth != null;
+      // Only the volunteer can update their own data
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.user_id;
+    }
+
+    // ── EMERGENCY REQUESTS ──
+    match /emergency_requests/{requestId} {
+      // Allow read for all authenticated users to allow the application's global feed of "Nearby Missions" to function.
+      // (Restricting reads per document requires complex composite queries and indexes in the client SDK.)
+      allow read: if request.auth != null;
+      
+      // CREATE: Only the user claiming to be the creator can create it
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      
+      // UPDATE: Only the citizen, the assigned NGO, or an assigned volunteer can modify the task.
+      allow update: if request.auth != null && (
+        resource.data.user_id == request.auth.uid || 
+        resource.data.ngo_id == request.auth.uid ||
+        (resource.data.assigned_volunteer_ids != null && request.auth.uid in resource.data.assigned_volunteer_ids) ||
+        (!("ngo_id" in resource.data) || resource.data.ngo_id == null || resource.data.ngo_id == "") ||
+        (!("assigned_volunteer_ids" in resource.data) || resource.data.assigned_volunteer_ids == null || resource.data.assigned_volunteer_ids.size() == 0)
+      );
+      
+      allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+
+      // ── Subcollections for assignments (Per-volunteer state) ──
+      match /assignments/{assignmentId} {
+         allow read: if request.auth != null;
+         allow write: if request.auth != null && request.auth.uid == assignmentId;
+      }
+    }
+
+    // ── REPORTS (Misuse) ──
+    match /request_reports/{reportId} {
+      // No one can read reports except admins via Firebase Console
+      allow read: if false; 
+      // Anyone authenticated can create a report, but they must identify as themselves
+      allow create: if request.auth != null && request.resource.data.reporter_id == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}

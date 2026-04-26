@@ -150,6 +150,7 @@ interface AppDataContextValue {
   isToggling: boolean;
   rejectTask: (requestId: string) => Promise<void>;
   citizenFinalize: (requestId: string, approved: boolean, feedback?: string, rating?: number) => Promise<void>;
+  rateTask: (requestId: string, rating: number, feedback: string, userRole: string) => Promise<void>;
   approveVolunteer: (volunteerId: string) => Promise<void>;
   rejectVolunteer: (volunteerId: string) => Promise<void>;
   createNotification: (userId: string, title: string, body: string, type?: string) => Promise<void>;
@@ -1403,7 +1404,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       status,
       citizen_approved: approved,
       citizen_feedback: feedback || "",
-      rating: rating || null,
+      ratingByCitizen: rating || null,
+      feedbackByCitizen: feedback || "",
+      rating: rating || null, // legacy support
       completed_at: approved ? new Date().toISOString() : null,
       updated_at: serverTimestamp(),
     });
@@ -1467,6 +1470,20 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [user, checkAndAwardBadges]);
+
+  const rateTask = useCallback(async (requestId: string, rating: number, feedback: string, userRole: string) => {
+    const updateData: any = { updated_at: serverTimestamp() };
+    if (userRole === "citizen") {
+      updateData.ratingByCitizen = rating;
+      updateData.feedbackByCitizen = feedback;
+      updateData.rating = rating; // legacy
+      updateData.citizen_feedback = feedback; // legacy
+    } else {
+      updateData.ratingByVolunteer = rating;
+      updateData.feedbackByVolunteer = feedback;
+    }
+    await updateDoc(doc(db, "emergency_requests", requestId), updateData);
+  }, []);
 
   // ── Remaining CRUD actions ────────────────────────────────────────────────
 
@@ -1687,6 +1704,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       completeRequest,
       rejectTask,
       citizenFinalize,
+      rateTask,
       approveVolunteer,
       rejectVolunteer,
       createNotification,
@@ -1702,7 +1720,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       profile, isAuthenticated, emergencyMode, isAvailable, isToggling,
       followingList, createEmergency, autoAssignVolunteers, handleVolunteerShortage,
       acknowledgeAssignment, acceptRequest, assignVolunteer, volunteerAdvance,
-      completeRequest, rejectTask, citizenFinalize, login, register, logout, resetPassword,
+      completeRequest, rejectTask, citizenFinalize, rateTask, login, register, logout, resetPassword,
       toggleFollow, toggleAvailable, joinTask, approveVolunteer, rejectVolunteer,
       createNotification,
     ]

@@ -8,11 +8,12 @@ import t from "@/utils/i18n";
 
 interface RatingModalProps {
   open: boolean;
+  role?: "citizen" | "volunteer" | "ngo";
   onSubmit: (rating: number, feedback: string) => Promise<void>;
   onClose: () => void;
 }
 
-export default function RatingModal({ open, onSubmit, onClose }: RatingModalProps) {
+export default function RatingModal({ open, role = "citizen", onSubmit, onClose }: RatingModalProps) {
   const [rating, setRating] = useState(0);
   const [hoveredStar, setHoveredStar] = useState(0);
   const [feedback, setFeedback] = useState("");
@@ -66,8 +67,12 @@ export default function RatingModal({ open, onSubmit, onClose }: RatingModalProp
               ) : (
                 <motion.div key="form" className="space-y-5">
                   <div className="text-center">
-                    <h3 className="text-lg font-bold text-foreground">{t("rating.title")}</h3>
-                    <p className="text-xs text-muted-foreground mt-1">How was your experience?</p>
+                    <h3 className="text-lg font-bold text-foreground">
+                      {role === "citizen" ? t("rating.title") : "Rate the Mission"}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {role === "citizen" ? "How was your experience?" : "How was the situation and citizen?"}
+                    </p>
                   </div>
 
                   {/* Star rating */}
