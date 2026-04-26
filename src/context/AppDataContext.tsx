@@ -570,14 +570,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }
 
     // Fetch ALL volunteers — we'll filter by NGO membership below.
-    // We query all, NOT just available==true, because a volunteer in the primary
-    // NGO may be currently marked offline but can toggle available and accept.
-    // Cascade to other NGOs must NOT happen just because some volunteers are busy.
     const vQuery = query(collection(db, "volunteers"));
     const vSnapshot = await getDocs(vQuery);
     if (vSnapshot.empty) {
       console.warn("[AutoAssign] No volunteers found in database at all.");
-      // Nothing to do — notify the NGO admin to register volunteers first
       const ngoSnap = await getDoc(doc(db, "ngos", targetNgoId));
       if (ngoSnap.exists()) {
         await createNotification(
@@ -604,19 +600,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       })
     );
 
-    // Filter: NGO-specific or global
+    // ── Exclusion list: already assigned + already notified (across all waves) ────
     const alreadyAssigned: string[] = reqData.assigned_volunteer_ids || [];
-    let eligiblePool = isGlobal
-      ? volDataRaw.filter((v: any) => !alreadyAssigned.includes(v.id))
-      : volDataRaw.filter(
-        (v: any) =>
-          v.ngo_memberships?.[targetNgoId] === "approved" && !alreadyAssigned.includes(v.id)
-      );
+    const alreadyNotified: string[] = reqData.notified_volunteer_ids || [];
+    const globalExclude = new Set([...alreadyAssigned, ...alreadyNotified]);
 
-    // Fallback: If strict NGO filtering yields no one, loosen to anyone to heavily prevent request getting stuck
+    // Filter: NGO-specific or global — exclude both assigned AND previously notified
+    let eligiblePool = isGlobal
+      ? volDataRaw.filter((v: any) => !globalExclude.has(v.id))
+      : volDataRaw.filter(
+          (v: any) =>
+            v.ngo_memberships?.[targetNgoId] === "approved" && !globalExclude.has(v.id)
+        );
+
+    // Fallback: strict NGO filtering yielded no one — loosen to any volunteer
     if (eligiblePool.length === 0 && !isGlobal) {
-      console.warn(`[AutoAssign] No approved volunteers in NGO ${targetNgoId}. Falling back to ANY volunteer to prevent assignment getting stuck.`);
-      eligiblePool = volDataRaw.filter((v: any) => !alreadyAssigned.includes(v.id));
+      console.warn(`[AutoAssign] No approved volunteers in NGO ${targetNgoId} (wave). Falling back to ANY volunteer.`);
+      eligiblePool = volDataRaw.filter((v: any) => !globalExclude.has(v.id));
     }
 
     if (eligiblePool.length === 0) {
@@ -670,7 +670,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       })
       .sort((a: any, b: any) => b.totalScore - a.totalScore);
 
-    const toAssign = ranked.slice(0, remainingToMax);
+    // ── Over-provision: send to 2× needed so fastest-acceptors fill slots first ──
+    // Cap at the actual pool size to avoid re-assigning same people.
+    const OVERPROVISION = 2;
+    const waveSize = Math.min(eligiblePool.length, remainingToMax * OVERPROVISION);
+    const toAssign = ranked.slice(0, waveSize);
     
     // DEBUG LOGS
     console.log("[AutoAssign DEBUG]", {
@@ -759,6 +763,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       ...(missionBrief && { ai_mission_brief: missionBrief }),
       ...(aiMatch?.reasoning && { ai_analysis_reason: aiMatch.reasoning }),
       ...(aiMatch?.suggestedSteps && { ai_suggested_steps: aiMatch.suggestedSteps }),
+      // ── Persistent notified list (cross-wave deduplication) ────────────────────
+      notified_volunteer_ids: arrayUnion(...newAssignedIds),
+      dispatches_count: (reqData.dispatches_count || 0) + 1,
       updated_at: serverTimestamp(),
     });
 
@@ -772,17 +779,19 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Notify assigned volunteers
+    // Notify assigned volunteers (only the wave — not all assigned)
     await Promise.all(
       toAssign.map((v: any) =>
         createNotification(
           v.user_id,
           v.id === leaderId ? "🏅 You are the Team Leader!" : "🚨 New Mission Assigned",
-          `You've been dispatched to a ${reqData.category} emergency${v.id === leaderId ? " and selected as Team Leader" : ""}. Check your dashboard.`,
+          `You've been dispatched to a ${reqData.category} emergency${v.id === leaderId ? " and selected as Team Leader" : ""}. Accept within 5 minutes or your slot will be reassigned.`,
           "request_accepted"
         )
       )
     );
+
+    console.log(`[AutoAssign] Wave ${(reqData.dispatches_count || 0) + 1}: notified ${toAssign.length} volunteers for ${remainingToMax} open slot(s). Over-provisioned by ${OVERPROVISION}×.`);
 
     // ── IMPORTANT: Do NOT cascade to other NGOs here ──────────────────────
     // If this NGO's pool couldn't fill all slots right now (some volunteers
@@ -1597,12 +1606,78 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const volunteerAdvance = useCallback(async (requestId: string, status: string) => {
     const actor = user?.uid || "unknown";
+
+    // ── Acceptance path: slot-aware atomic check ──────────────────────────────
+    if (status === "In Progress") {
+      const vol = volunteers.find((v) => v.userId === actor);
+      if (!vol) {
+        // Fallback: no vol found, just update status normally
+        await updateDoc(doc(db, "emergency_requests", requestId), {
+          status,
+          updated_at: serverTimestamp(),
+          status_history: arrayUnion({ status, timestamp: new Date().toISOString(), actor }),
+        });
+        return;
+      }
+
+      const reqRef = doc(db, "emergency_requests", requestId);
+      const assignRef = doc(db, "emergency_requests", requestId, "assignments", vol.id);
+
+      const slotSecured = await runTransaction(db, async (tx) => {
+        const reqSnap = await tx.get(reqRef);
+        const assignSnap = await tx.get(assignRef);
+        if (!reqSnap.exists() || !assignSnap.exists()) return false;
+
+        const reqData = reqSnap.data();
+        const minNeeded = reqData.min_volunteers_needed
+          ?? (() => { const p = String(reqData.volunteers_needed || "1").replace("+", "").split("-"); return parseInt(p[0], 10) || 1; })();
+
+        // Count volunteers already "In Progress" (accepted)
+        const assignSnaps = await getDocs(collection(db, "emergency_requests", requestId, "assignments"));
+        const acceptedCount = assignSnaps.docs.filter(
+          (d) => d.data().status === "accepted" && d.id !== vol.id
+        ).length;
+
+        if (acceptedCount >= minNeeded) {
+          // Slots full \u2014 mark this volunteer as slot_taken
+          tx.update(assignRef, { status: "slot_taken", slot_taken_at: new Date().toISOString() });
+          tx.update(doc(db, "volunteers", vol.id), { available: true, current_task_id: null });
+          return false; // slot taken
+        }
+
+        // Slot available \u2014 claim it
+        tx.update(assignRef, { status: "accepted", accepted_at: new Date().toISOString() });
+        tx.update(reqRef, {
+          status: "In Progress",
+          updated_at: serverTimestamp(),
+          status_history: arrayUnion({ status: "In Progress", timestamp: new Date().toISOString(), actor }),
+        });
+        return true;
+      });
+
+      if (!slotSecured) {
+        // Notify volunteer their slot was taken
+        await createNotification(
+          actor,
+          "⚡ Slot Already Filled",
+          "Another volunteer accepted this mission before you. You've been released \u2014 stay available for the next dispatch!",
+          "info"
+        );
+        console.log(`[VolunteerAdvance] Slot already full for ${requestId}. Vol ${vol.id} marked slot_taken.`);
+      } else {
+        console.log(`[VolunteerAdvance] Vol ${vol.id} secured slot for ${requestId}.`);
+      }
+      return;
+    }
+
+    // ── Any other status (Verification Pending, etc.) \u2014 simple write ─────────
     await updateDoc(doc(db, "emergency_requests", requestId), {
       status,
       updated_at: serverTimestamp(),
       status_history: arrayUnion({ status, timestamp: new Date().toISOString(), actor }),
     });
-  }, [user]);
+  }, [user, volunteers, createNotification]);
+
 
   const approveVolunteer = useCallback(async (vId: string) => {
     const ngo = ngos.find((n) => n.userId === user?.uid);
