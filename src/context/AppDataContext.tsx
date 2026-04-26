@@ -1062,29 +1062,35 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         await batch.commit();
 
         if (newRemaining > 0) {
-          // ── STEP 1: Try to refill from the primary NGO first ─────────────────
+          // ── STEP 1: Next wave from primary NGO (excluding all previously notified) ──
           const primaryNgoId = reqData.ngo_id;
           if (primaryNgoId) {
             const vSnap = await getDocs(query(collection(db, "volunteers")));
-            const sameNgoPool = vSnap.docs.filter((d) => {
+            // Build full exclusion: accepted + every volunteer ever notified
+            const alreadyNotifiedSet = new Set<string>([
+              ...currentAssigned,
+              ...(reqData.notified_volunteer_ids || []),
+            ]);
+            const freshNgoPool = vSnap.docs.filter((d) => {
               const memberships = d.data().ngo_memberships || {};
               return (
                 memberships[primaryNgoId] === "approved" &&
-                !currentAssigned.includes(d.id) &&
-                !timedOutVolIds.includes(d.id)
+                !alreadyNotifiedSet.has(d.id)
               );
             });
 
-            if (sameNgoPool.length > 0) {
-              console.log(`[TimeoutEngine] Primary NGO (${primaryNgoId}) has ${sameNgoPool.length} more member(s). Refilling from same NGO.`);
+            if (freshNgoPool.length > 0) {
+              console.log(`[TimeoutEngine] Next wave: ${freshNgoPool.length} fresh volunteer(s) in primary NGO for ${newRemaining} open slot(s).`);
               await autoAssignVolunteers(req.id, primaryNgoId);
               return;
             }
+            console.log(`[TimeoutEngine] Primary NGO has no more fresh volunteers. Cascading to other NGOs.`);
           }
-          
-          // ── STEP 2: Cascade if primary NGO is exhausted ───────────────
+
+          // ── STEP 2: Cascade to other NGOs ──────────────────────────────────
           await handleVolunteerShortage(req.id);
         }
+
       } catch (e) {
         console.warn(`[TimeoutEngine] Transaction conflict or error for ${req.id}:`, e);
       }
@@ -1628,27 +1634,28 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         const assignSnap = await tx.get(assignRef);
         if (!reqSnap.exists() || !assignSnap.exists()) return false;
 
+        // Assignment already resolved (timed out or slot_taken)
+        const aData = assignSnap.data();
+        if (aData.status !== "assigned") return false;
+
         const reqData = reqSnap.data();
-        const minNeeded = reqData.min_volunteers_needed
+        const minNeeded: number = reqData.min_volunteers_needed
           ?? (() => { const p = String(reqData.volunteers_needed || "1").replace("+", "").split("-"); return parseInt(p[0], 10) || 1; })();
 
-        // Count volunteers already "In Progress" (accepted)
-        const assignSnaps = await getDocs(collection(db, "emergency_requests", requestId, "assignments"));
-        const acceptedCount = assignSnaps.docs.filter(
-          (d) => d.data().status === "accepted" && d.id !== vol.id
-        ).length;
-
-        if (acceptedCount >= minNeeded) {
-          // Slots full \u2014 mark this volunteer as slot_taken
+        // Atomic: count accepted slots via the accepted_volunteer_ids array field
+        const acceptedIds: string[] = reqData.accepted_volunteer_ids || [];
+        if (acceptedIds.length >= minNeeded) {
+          // Slots full — mark this volunteer slot_taken
           tx.update(assignRef, { status: "slot_taken", slot_taken_at: new Date().toISOString() });
           tx.update(doc(db, "volunteers", vol.id), { available: true, current_task_id: null });
-          return false; // slot taken
+          return false;
         }
 
-        // Slot available \u2014 claim it
+        // Slot available — claim it atomically
         tx.update(assignRef, { status: "accepted", accepted_at: new Date().toISOString() });
         tx.update(reqRef, {
           status: "In Progress",
+          accepted_volunteer_ids: arrayUnion(vol.id),
           updated_at: serverTimestamp(),
           status_history: arrayUnion({ status: "In Progress", timestamp: new Date().toISOString(), actor }),
         });
