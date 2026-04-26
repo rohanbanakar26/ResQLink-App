@@ -670,10 +670,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       })
       .sort((a: any, b: any) => b.totalScore - a.totalScore);
 
-    // ── Over-provision: send to 2× needed so fastest-acceptors fill slots first ──
-    // Cap at the actual pool size to avoid re-assigning same people.
+    // ── Over-provision: always send 2×max_needed per wave (your design: x to y slots → 2y notified)
+    // This is constant per wave, regardless of how many have already accepted,
+    // so each round always has a full competitive pool.
     const OVERPROVISION = 2;
-    const waveSize = Math.min(eligiblePool.length, remainingToMax * OVERPROVISION);
+    const waveSize = Math.min(eligiblePool.length, maxNeeded * OVERPROVISION);
     const toAssign = ranked.slice(0, waveSize);
     
     // DEBUG LOGS
@@ -1062,34 +1063,47 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         await batch.commit();
 
         if (newRemaining > 0) {
-          // ── STEP 1: Next wave from primary NGO (excluding all previously notified) ──
-          const primaryNgoId = reqData.ngo_id;
-          if (primaryNgoId) {
-            const vSnap = await getDocs(query(collection(db, "volunteers")));
-            // Build full exclusion: accepted + every volunteer ever notified
-            const alreadyNotifiedSet = new Set<string>([
-              ...currentAssigned,
-              ...(reqData.notified_volunteer_ids || []),
-            ]);
-            const freshNgoPool = vSnap.docs.filter((d) => {
-              const memberships = d.data().ngo_memberships || {};
-              return (
-                memberships[primaryNgoId] === "approved" &&
-                !alreadyNotifiedSet.has(d.id)
-              );
-            });
+          // Re-read fresh state: team may have self-finalized via volunteerAdvance
+          // between when the timeout fired and now.
+          const freshReqSnap = await getDoc(reqRef);
+          const freshData = freshReqSnap.exists() ? freshReqSnap.data() : {};
+          const acceptedNow: number = (freshData.accepted_volunteer_ids || []).length;
+          const minNeed: number = freshData.min_volunteers_needed
+            ?? (() => { const p = String(freshData.volunteers_needed || "1").replace("+", "").split("-"); return parseInt(p[0], 10) || 1; })();
 
-            if (freshNgoPool.length > 0) {
-              console.log(`[TimeoutEngine] Next wave: ${freshNgoPool.length} fresh volunteer(s) in primary NGO for ${newRemaining} open slot(s).`);
-              await autoAssignVolunteers(req.id, primaryNgoId);
-              return;
+          if (acceptedNow >= minNeed) {
+            // Team already has minimum required — stop escalating.
+            console.log(`[TimeoutEngine] ${req.id}: min team already met (${acceptedNow}/${minNeed}). Skipping escalation.`);
+          } else {
+            // Min not met after 5 min — dispatch next fresh wave (2×max_needed).
+            console.log(`[TimeoutEngine] ${req.id}: only ${acceptedNow}/${minNeed} accepted. Sending next 2×max wave.`);
+
+            // ── STEP 1: Fresh wave from primary NGO ─────────────────────────
+            const primaryNgoId = freshData.ngo_id;
+            if (primaryNgoId) {
+              const vSnap = await getDocs(query(collection(db, "volunteers")));
+              const alreadyNotifiedSet = new Set<string>([
+                ...currentAssigned,
+                ...(freshData.notified_volunteer_ids || []),
+              ]);
+              const freshNgoPool = vSnap.docs.filter((d) => {
+                const memberships = d.data().ngo_memberships || {};
+                return memberships[primaryNgoId] === "approved" && !alreadyNotifiedSet.has(d.id);
+              });
+
+              if (freshNgoPool.length > 0) {
+                console.log(`[TimeoutEngine] ${freshNgoPool.length} fresh candidates in primary NGO. Dispatching next 2×max wave.`);
+                await autoAssignVolunteers(req.id, primaryNgoId);
+                return;
+              }
+              console.log(`[TimeoutEngine] Primary NGO exhausted. Cascading to other NGOs.`);
             }
-            console.log(`[TimeoutEngine] Primary NGO has no more fresh volunteers. Cascading to other NGOs.`);
-          }
 
-          // ── STEP 2: Cascade to other NGOs ──────────────────────────────────
-          await handleVolunteerShortage(req.id);
+            // ── STEP 2: Cascade to other NGOs ──────────────────────────────
+            await handleVolunteerShortage(req.id);
+          }
         }
+
 
       } catch (e) {
         console.warn(`[TimeoutEngine] Transaction conflict or error for ${req.id}:`, e);
@@ -1663,16 +1677,57 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       });
 
       if (!slotSecured) {
-        // Notify volunteer their slot was taken
         await createNotification(
           actor,
           "⚡ Slot Already Filled",
-          "Another volunteer accepted this mission before you. You've been released \u2014 stay available for the next dispatch!",
+          "Another volunteer accepted this mission before you. You've been released — stay available for the next dispatch!",
           "info"
         );
         console.log(`[VolunteerAdvance] Slot already full for ${requestId}. Vol ${vol.id} marked slot_taken.`);
       } else {
         console.log(`[VolunteerAdvance] Vol ${vol.id} secured slot for ${requestId}.`);
+
+        // ── Check: if minimum team size now met, finalize the team ──────────────────
+        // Cancel all still-pending "assigned" slots and free those volunteers.
+        const freshReqSnap = await getDoc(doc(db, "emergency_requests", requestId));
+        if (freshReqSnap.exists()) {
+          const rd = freshReqSnap.data();
+          const acceptedCount = (rd.accepted_volunteer_ids || []).length;
+          const minNeed = rd.min_volunteers_needed
+            ?? (() => { const p = String(rd.volunteers_needed || "1").replace("+", "").split("-"); return parseInt(p[0], 10) || 1; })();
+
+          if (acceptedCount >= minNeed) {
+            console.log(`[VolunteerAdvance] Min team size met (${acceptedCount}/${minNeed}). Finalizing team and cancelling pending slots.`);
+            const allAssign = await getDocs(collection(db, "emergency_requests", requestId, "assignments"));
+            const cancelBatch = writeBatch(db);
+            const cancelledVolIds: string[] = [];
+
+            allAssign.docs.forEach((assignDoc) => {
+              if (assignDoc.data().status === "assigned") {
+                cancelBatch.update(assignDoc.ref, { status: "slot_taken", slot_taken_at: new Date().toISOString() });
+                cancelBatch.update(doc(db, "volunteers", assignDoc.data().volunteer_id), {
+                  available: true,
+                  current_task_id: null,
+                });
+                cancelledVolIds.push(assignDoc.data().volunteer_id);
+              }
+            });
+            await cancelBatch.commit();
+
+            // Notify cancelled volunteers
+            await Promise.all(
+              cancelledVolIds.map((vId) => {
+                const vData = volunteers.find((v) => v.id === vId);
+                return vData ? createNotification(
+                  vData.userId,
+                  "✅ Team Fully Staffed",
+                  "The minimum team size was reached by other volunteers. Your slot has been released — you remain available for future missions.",
+                  "info"
+                ) : Promise.resolve();
+              })
+            );
+          }
+        }
       }
       return;
     }
