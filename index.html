@@ -3,7 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- TODO: Set the document title to the name of your application -->
+    <!-- GitHub Pages SPA routing: restore path stored by 404.html -->
+    <script>
+      (function() {
+        var redirect = sessionStorage.getItem('spa-redirect');
+        if (redirect) {
+          sessionStorage.removeItem('spa-redirect');
+          window.history.replaceState(null, null, redirect);
+        }
+      })();
+    </script>
     <title>ResQLink — Real-time Emergency Response Network</title>
     <meta name="description" content="Citizens report emergencies, NGOs coordinate, volunteers respond — all from one live map and request stream." />
     <meta name="author" content="ResQLink" />

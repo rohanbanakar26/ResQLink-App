@@ -54,25 +54,29 @@ export default function CampaignCreator() {
     }
 
     const campaignsRef = collection(db, "campaigns");
+    // Use a simple where() without orderBy to avoid needing a composite index.
+    // We sort client-side by created_at after the snapshot arrives.
     const q = query(
-      campaignsRef, 
-      where("ngo_id", "==", ngo.id), 
-      orderBy("created_at", "desc")
+      campaignsRef,
+      where("ngo_id", "==", ngo.id)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMyCampaigns(snapshot.docs.map(d => {
-        const c = d.data();
-        return {
-          id: d.id,
-          title: c.title,
-          caption: c.caption,
-          mediaUrls: c.media_urls || [],
-          likesCount: c.likes_count || 0,
-          commentsCount: c.comments_count || 0,
-          createdAt: c.created_at?.toMillis?.() || Date.now(),
-        };
-      }));
+      const sorted = snapshot.docs
+        .map(d => {
+          const c = d.data();
+          return {
+            id: d.id,
+            title: c.title,
+            caption: c.caption,
+            mediaUrls: c.media_urls || [],
+            likesCount: c.likes_count || 0,
+            commentsCount: c.comments_count || 0,
+            createdAt: c.created_at?.toMillis?.() || Date.now(),
+          };
+        })
+        .sort((a, b) => b.createdAt - a.createdAt); // newest first
+      setMyCampaigns(sorted);
       setLoading(false);
     });
 
