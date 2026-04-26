@@ -36,6 +36,32 @@ export default function EmergencyPage() {
     return currentUser?.role === "volunteer" && !localStorage.getItem("onboarding_complete");
   });
 
+  // ── ALL hooks must be above every conditional return ────────────────────────
+  const updateField = useCallback((field: string, value: any) => {
+    setExtraFields((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  // SOS — one-tap panic: send a critical disaster request immediately
+  const handleSOS = useCallback(async () => {
+    if (sosSending) return;
+    setSosSending(true);
+    try {
+      await createEmergency({
+        category: "disaster",
+        urgency: "critical",
+        description: "SOS - Immediate help needed. Please respond urgently.",
+        volunteers_needed: 3,
+        people_affected: 1,
+      });
+      setShowMatching(true);
+    } catch (err) {
+      console.error("SOS failed:", err);
+    } finally {
+      setSosSending(false);
+    }
+  }, [sosSending, createEmergency]);
+
+  // ── Guards (after all hooks) ───────────────────────────────────────────────
   if (!isAuthenticated) {
     return <Navigate to="/auth" replace />;
   }
@@ -62,29 +88,7 @@ export default function EmergencyPage() {
     return <NgoControlCenter />;
   }
 
-  const updateField = (field: string, value: any) => {
-    setExtraFields((prev) => ({ ...prev, [field]: value }));
-  };
-
-  // SOS — one-tap panic: sends a critical disaster request immediately
-  const handleSOS = useCallback(async () => {
-    if (sosSending) return;
-    setSosSending(true);
-    try {
-      await createEmergency({
-        category: "disaster",
-        urgency: "critical",
-        description: "SOS - Immediate help needed. Please respond urgently.",
-        volunteers_needed: 3,
-        people_affected: 1,
-      });
-      setShowMatching(true);
-    } catch (err) {
-      console.error("SOS failed:", err);
-    } finally {
-      setSosSending(false);
-    }
-  }, [sosSending, createEmergency]);
+  // ── Citizen form helpers (not hooks, safe after returns) ──────────────────
 
   const handleSend = async () => {
     // Sanitation requires proof

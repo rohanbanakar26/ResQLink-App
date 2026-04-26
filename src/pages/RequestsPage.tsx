@@ -27,14 +27,10 @@ export default function RequestsPage() {
   const [ratingRequest, setRatingRequest] = useState<string | null>(null);
   const [reportRequest, setReportRequest] = useState<string | null>(null);
   const [declinedRequests, setDeclinedRequests] = useState<Set<string>>(new Set());
-  // Live countdown timers per request (seconds remaining)
   const [countdowns, setCountdowns] = useState<Record<string, number>>({});
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  if (!isAuthenticated) {
-    return <Navigate to="/auth" replace />;
-  }
-
+  // Derive role/userId early so hooks below can reference them
   const role = currentUser?.role ?? "citizen";
   const userId = currentUser?.userId;
 
@@ -53,23 +49,19 @@ export default function RequestsPage() {
     return source.filter((r: any) => r.status === "Cancelled");
   }, [role, myRequests, myAssignedRequests]);
 
-  const totalPeopleHelped = completedRequests.length * 5; 
+  const totalPeopleHelped = completedRequests.length * 5;
   const successRate = myRequests.length > 0
     ? Math.round((completedRequests.length / myRequests.length) * 100)
     : 0;
-
-  // NOTE: The 10-minute global escalation engine lives in AppDataContext.tsx
-  // (client-side Firestore transaction, race-condition safe across all open tabs).
-  // No duplicated logic needed here.
 
   // Citizen cancel (only allowed before volunteers are dispatched)
   const cancelRequest = useCallback(async (requestId: string) => {
     await citizenFinalize(requestId, false, "Cancelled by citizen");
   }, [citizenFinalize]);
 
-  // Tick countdown timers every second for pending assignments
+  // Tick countdown timers every second for pending volunteer assignments
   useEffect(() => {
-    const WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+    const WINDOW_MS = 5 * 60 * 1000;
     const tick = () => {
       const next: Record<string, number> = {};
       const source = role === "volunteer" ? myAssignedRequests : [];
@@ -88,6 +80,11 @@ export default function RequestsPage() {
     countdownRef.current = setInterval(tick, 1000);
     return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
   }, [myAssignedRequests, role]);
+
+  // ── Guard: must be after all hooks ──────────────────────────────────────────
+  if (!isAuthenticated) {
+    return <Navigate to="/auth" replace />;
+  }
 
   const handleUploadProofs = async (requestId: string, urls: string[]) => {
     await updateDoc(doc(db, "emergency_requests", requestId), {
