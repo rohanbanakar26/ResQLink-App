@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Navigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { REQUEST_CATEGORIES, URGENCY_OPTIONS, getCategoryMeta, STATUS_COPY, STATUS_COLORS } from "../data/system";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, Send, Clock, CheckCircle2, MapPin, Locate, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Send, Clock, CheckCircle2, MapPin, Locate, ShieldAlert, Siren, Loader2 } from "lucide-react";
 import FoodForm from "@/components/emergency/FoodForm";
 import DisasterForm from "@/components/emergency/DisasterForm";
 import SanitationForm from "@/components/emergency/SanitationForm";
@@ -31,6 +31,7 @@ export default function EmergencyPage() {
   const [submitting, setSubmitting] = useState(false);
   const [showMatching, setShowMatching] = useState(false);
   const [misuseError, setMisuseError] = useState("");
+  const [sosSending, setSosSending] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return currentUser?.role === "volunteer" && !localStorage.getItem("onboarding_complete");
   });
@@ -64,6 +65,26 @@ export default function EmergencyPage() {
   const updateField = (field: string, value: any) => {
     setExtraFields((prev) => ({ ...prev, [field]: value }));
   };
+
+  // SOS — one-tap panic: sends a critical disaster request immediately
+  const handleSOS = useCallback(async () => {
+    if (sosSending) return;
+    setSosSending(true);
+    try {
+      await createEmergency({
+        category: "disaster",
+        urgency: "critical",
+        description: "SOS - Immediate help needed. Please respond urgently.",
+        volunteers_needed: 3,
+        people_affected: 1,
+      });
+      setShowMatching(true);
+    } catch (err) {
+      console.error("SOS failed:", err);
+    } finally {
+      setSosSending(false);
+    }
+  }, [sosSending, createEmergency]);
 
   const handleSend = async () => {
     // Sanitation requires proof
@@ -129,6 +150,26 @@ export default function EmergencyPage() {
             {t("emergency.subtitle")}
           </p>
         </div>
+
+        {/* SOS Panic Button */}
+        <motion.button
+          id="sos-panic-button"
+          onClick={handleSOS}
+          disabled={sosSending}
+          whileTap={{ scale: 0.96 }}
+          className="w-full relative overflow-hidden rounded-2xl border-2 border-emergency bg-emergency text-white p-5 flex items-center justify-center gap-3 shadow-xl shadow-emergency/30 disabled:opacity-80"
+        >
+          {/* Pulsing ring */}
+          <span className="absolute inset-0 rounded-2xl animate-ping bg-emergency opacity-20 pointer-events-none" />
+          {sosSending
+            ? <Loader2 className="w-7 h-7 animate-spin" />
+            : <Siren className="w-7 h-7" />
+          }
+          <div className="text-left">
+            <p className="text-lg font-black tracking-wider uppercase">{sosSending ? "Sending SOS…" : "SOS — Emergency!"}</p>
+            <p className="text-[11px] opacity-80 font-semibold">One tap • Deploys nearest team instantly</p>
+          </div>
+        </motion.button>
 
         {/* Misuse Error */}
         <AnimatePresence>

@@ -14,9 +14,35 @@ import StreakTracker from "@/components/profile/StreakTracker";
 import TrustStars from "@/components/profile/TrustStars";
 import t from "@/utils/i18n";
 
+// ── Level helpers ──────────────────────────────────────────────────────────
+const POINTS_PER_LEVEL = 200;
+function getLevelFromPoints(points: number) {
+  return Math.floor(points / POINTS_PER_LEVEL) + 1;
+}
+function getProgressToNextLevel(points: number) {
+  return ((points % POINTS_PER_LEVEL) / POINTS_PER_LEVEL) * 100;
+}
+function getPointsToNextLevel(points: number) {
+  return POINTS_PER_LEVEL - (points % POINTS_PER_LEVEL);
+}
+
 export default function ProfilePage() {
   const { currentUser, logout, isAvailable, isAuthenticated, loading, followingList, ngos, volunteers } = useAppData();
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   
+  // Fetch avatar when user changes
+  useEffect(() => {
+    if (!currentUser?.userId) { setAvatarUrl(null); return; }
+    const profileRef = doc(db, "profiles", currentUser.userId);
+    getDoc(profileRef).then((snap) => {
+      if (snap.exists()) setAvatarUrl(snap.data().avatar_url || null);
+    }).catch(() => {});
+  }, [currentUser?.userId]);
+
+  const level = getLevelFromPoints(currentUser?.points ?? 0);
+  const progressPct = getProgressToNextLevel(currentUser?.points ?? 0);
+  const ptsToNext = getPointsToNextLevel(currentUser?.points ?? 0);
+
   const followersCount = useMemo(() => {
     if (currentUser?.role === "ngo") return ngos.find(n => n.userId === currentUser.userId)?.followersCount || 0;
     if (currentUser?.role === "volunteer") return volunteers.find(v => v.userId === currentUser.userId)?.followersCount || 0;
@@ -113,7 +139,11 @@ export default function ProfilePage() {
       <div className="flex flex-col items-center text-center space-y-4">
         <div className="relative group">
           <div className="w-28 h-28 rounded-full bg-muted/20 border-4 border-emergency/20 overflow-hidden shadow-2xl relative flex items-center justify-center">
-             <User className="w-16 h-16 text-muted-foreground/30" />
+             {avatarUrl ? (
+               <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
+             ) : (
+               <User className="w-16 h-16 text-muted-foreground/30" />
+             )}
              {currentUser.role === "volunteer" && isAvailable && (
                 <div className="absolute inset-0 border-4 border-success animate-pulse rounded-full" />
              )}
@@ -125,9 +155,11 @@ export default function ProfilePage() {
         
         <div>
           <h1 className="text-3xl font-black text-foreground tracking-tight">{currentUser.name}</h1>
-          <div className="flex items-center justify-center gap-2 mt-1">
-             <TrustStars score={4.8} size="md" />
-             <span className="text-xs font-bold text-muted-foreground uppercase opacity-60 tracking-wider">Level 12 Protector</span>
+          <div className="mt-1 flex items-center justify-center gap-2">
+             <TrustStars score={currentUser.trustScore} size="md" />
+             <span className="text-xs font-bold text-muted-foreground uppercase opacity-60 tracking-wider">
+               Level {level} Protector
+             </span>
           </div>
           <div className="mt-3 flex justify-center items-center gap-2">
              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -182,7 +214,10 @@ export default function ProfilePage() {
                <CardContent className="p-5">
                   <Trophy className="w-8 h-8 text-warning mb-2 group-hover:scale-125 transition-transform" />
                   <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Impact Points</p>
-                  <p className="text-2xl font-black text-foreground">{currentUser.points.toLocaleString()} <span className="text-[10px] text-success">+50 today</span></p>
+                  <p className="text-2xl font-black text-foreground">
+                    {currentUser.points.toLocaleString()}
+                    <span className="text-[10px] text-success ml-1">+{ptsToNext} to Lv.{level + 1}</span>
+                  </p>
                   <ChevronRight className="absolute top-4 right-4 w-5 h-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
                </CardContent>
             </Card>
@@ -190,8 +225,11 @@ export default function ProfilePage() {
          <Card className="bg-gradient-to-br from-emergency/10 to-emergency/20 border-emergency/20 shadow-xl shadow-emergency/5 relative overflow-hidden h-full">
             <CardContent className="p-5">
                <Shield className="w-8 h-8 text-emergency mb-2" />
-               <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Trust Store</p>
-               <p className="text-2xl font-black text-foreground">98 <span className="text-[10px] text-muted-foreground">/ 100</span></p>
+               <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Trust Score</p>
+               <p className="text-2xl font-black text-foreground">
+                 {Math.round((currentUser.trustScore ?? 4.5) * 20)}
+                 <span className="text-[10px] text-muted-foreground"> / 100</span>
+               </p>
                <Zap className="absolute top-4 right-4 w-5 h-5 text-warning fill-warning opacity-50" />
             </CardContent>
          </Card>

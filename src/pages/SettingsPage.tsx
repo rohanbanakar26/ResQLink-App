@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAppData } from "@/context/AppDataContext";
 import { db, storage } from "@/lib/firebase";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +25,15 @@ export default function SettingsPage() {
   const [skillsStr, setSkillsStr] = useState("");
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  // Fetch existing avatar on mount
+  useEffect(() => {
+    if (!currentUser?.userId) return;
+    getDoc(doc(db, "profiles", currentUser.userId))
+      .then((snap) => { if (snap.exists()) setAvatarUrl(snap.data().avatar_url || null); })
+      .catch(() => {});
+  }, [currentUser?.userId]);
 
   const currentVolunteer = currentUser?.role === "volunteer" ? volunteers.find((v) => v.userId === currentUser?.userId) : null;
   const currentNgo = currentUser?.role === "ngo" ? ngos.find((n) => n.userId === currentUser?.userId) : null;
@@ -88,9 +97,9 @@ export default function SettingsPage() {
     try {
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
-      
       const profileRef = doc(db, "profiles", currentUser.userId);
       await updateDoc(profileRef, { avatar_url: url });
+      setAvatarUrl(url); // update local state immediately
     } catch (e) {
       console.error("Error uploading avatar:", e);
     } finally {
@@ -131,7 +140,10 @@ export default function SettingsPage() {
           <div className="flex items-center gap-4">
             <div className="relative">
               <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
-                <User className="w-8 h-8 text-primary" />
+                {avatarUrl
+                  ? <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
+                  : <User className="w-8 h-8 text-primary" />
+                }
               </div>
               <label className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emergency flex items-center justify-center cursor-pointer">
                 <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />

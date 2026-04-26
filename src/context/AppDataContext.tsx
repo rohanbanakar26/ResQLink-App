@@ -314,36 +314,47 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       (err) => console.error("Requests listener error:", err)
     );
 
-    // 4. Volunteers
+    // 4. Volunteers — batch-fetch profiles to avoid N+1 reads
     const volunteersRef = collection(db, "volunteers");
     const unsubscribeVolunteers = onSnapshot(volunteersRef, async (snapshot) => {
-      const volData = await Promise.all(
-        snapshot.docs.map(async (d) => {
-          const v = d.data();
-          const pRef = doc(db, "profiles", v.user_id);
-          const pSnap = await getDoc(pRef);
-          const pData = pSnap.exists() ? pSnap.data() : {};
-          return {
-            id: d.id,
-            userId: v.user_id,
-            name: pData.full_name || "",
-            email: pData.email || "",
-            phone: pData.phone || "",
-            skills: Array.isArray(v.skills)
-              ? v.skills
-              : typeof v.skills === "string"
-                ? v.skills.split(",").map((s: string) => s.trim()).filter(Boolean)
-                : [],
-            location: toGeo(v.location_lat, v.location_lng),
-            available: v.available ?? true,
-            trustScore: pData.trust_score ?? 4.5,
-            completedTasks: v.completed_tasks || 0,
-            followersCount: v.followers_count || 0,
-            currentTaskId: v.current_task_id,
-            ngoMemberships: v.ngo_memberships || {},
-          };
+      if (snapshot.empty) { setVolunteers([]); return; }
+
+      // Chunk user_ids into groups of 30 (Firestore 'in' limit)
+      const userIds = snapshot.docs.map((d) => d.data().user_id).filter(Boolean);
+      const chunks: string[][] = [];
+      for (let i = 0; i < userIds.length; i += 30) chunks.push(userIds.slice(i, i + 30));
+
+      const profileMap = new Map<string, any>();
+      await Promise.all(
+        chunks.map(async (chunk) => {
+          const pSnap = await getDocs(query(collection(db, "profiles"), where("__name__", "in", chunk)));
+          pSnap.docs.forEach((d) => profileMap.set(d.id, d.data()));
         })
       );
+
+      const volData = snapshot.docs.map((d) => {
+        const v = d.data();
+        const pData: any = profileMap.get(v.user_id) ?? {};
+        return {
+          id: d.id,
+          userId: v.user_id,
+          name: pData.full_name || "",
+          email: pData.email || "",
+          phone: pData.phone || "",
+          skills: Array.isArray(v.skills)
+            ? v.skills
+            : typeof v.skills === "string"
+              ? v.skills.split(",").map((s: string) => s.trim()).filter(Boolean)
+              : [],
+          location: toGeo(v.location_lat, v.location_lng),
+          available: v.available ?? true,
+          trustScore: pData.trust_score ?? 4.5,
+          completedTasks: v.completed_tasks || 0,
+          followersCount: v.followers_count || 0,
+          currentTaskId: v.current_task_id,
+          ngoMemberships: v.ngo_memberships || {},
+        };
+      });
       setVolunteers(volData);
     }, (err) => console.error("Volunteers listener error:", err));
 
@@ -353,33 +364,40 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     };
   }, [user, profile?.role, profile?.userId]);
 
-  // ── NGOs (public) ─────────────────────────────────────────────────────────
+  // ── NGOs (public) — batch profile fetch ───────────────────────────────────
   useEffect(() => {
     const ngosRef = collection(db, "ngos");
     const unsubscribeNgos = onSnapshot(ngosRef, async (snapshot) => {
-      const ngoData = await Promise.all(
-        snapshot.docs.map(async (d) => {
-          const n = d.data();
-          let pData: any = {};
-          try {
-            const pRef = doc(db, "profiles", n.user_id);
-            const pSnap = await getDoc(pRef);
-            if (pSnap.exists()) pData = pSnap.data();
-          } catch (e) { }
-          return {
-            id: d.id,
-            userId: n.user_id,
-            ngoName: n.ngo_name,
-            email: pData.email || "",
-            phone: pData.phone || "",
-            services: n.services || [],
-            location: toGeo(n.location_lat, n.location_lng),
-            trustScore: pData.trust_score ?? 4.5,
-            capacity: n.capacity || 10,
-            followersCount: n.followers_count || 0,
-          };
+      if (snapshot.empty) { setNgos([]); setDataLoading(false); return; }
+
+      const userIds = snapshot.docs.map((d) => d.data().user_id).filter(Boolean);
+      const chunks: string[][] = [];
+      for (let i = 0; i < userIds.length; i += 30) chunks.push(userIds.slice(i, i + 30));
+
+      const profileMap = new Map<string, any>();
+      await Promise.all(
+        chunks.map(async (chunk) => {
+          const pSnap = await getDocs(query(collection(db, "profiles"), where("__name__", "in", chunk)));
+          pSnap.docs.forEach((d) => profileMap.set(d.id, d.data()));
         })
       );
+
+      const ngoData = snapshot.docs.map((d) => {
+        const n = d.data();
+        const pData: any = profileMap.get(n.user_id) ?? {};
+        return {
+          id: d.id,
+          userId: n.user_id,
+          ngoName: n.ngo_name,
+          email: pData.email || "",
+          phone: pData.phone || "",
+          services: n.services || [],
+          location: toGeo(n.location_lat, n.location_lng),
+          trustScore: pData.trust_score ?? 4.5,
+          capacity: n.capacity || 10,
+          followersCount: n.followers_count || 0,
+        };
+      });
       setNgos(ngoData);
       setDataLoading(false);
     }, (err) => {
@@ -526,16 +544,19 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     // How many slots still need to be filled?
     const currentlyAssigned = (reqData.assigned_volunteer_ids || []).length;
-    
-    // Safely parse range. Take min as the hard requirement, max as ideal requirement.
-    const rangeParts = String(reqData.volunteers_needed || "1").replace("+", "").split("-");
-    const minNeeded = parseInt(rangeParts[0], 10) || 1;
-    const maxNeeded = rangeParts.length > 1 ? (parseInt(rangeParts[1], 10) || minNeeded) : minNeeded;
+
+    // Prefer the clean int fields written by createEmergency().
+    // Fall back to string-parse for legacy docs created before the schema fix.
+    const minNeeded = reqData.min_volunteers_needed
+      ?? (() => { const p = String(reqData.volunteers_needed || "1").replace("+","").split("-"); return parseInt(p[0], 10) || 1; })();
+    const maxNeeded = reqData.max_volunteers_needed ?? minNeeded;
 
     let remainingToMax = maxNeeded - currentlyAssigned;
 
     if (typeof reqData.remaining_volunteers_needed !== "undefined" && reqData.remaining_volunteers_needed !== null) {
-       const storedRemaining = parseInt(String(reqData.remaining_volunteers_needed).split("-").pop() || "0", 10) || 0;
+       const storedRemaining = typeof reqData.remaining_volunteers_needed === "number"
+         ? reqData.remaining_volunteers_needed
+         : (parseInt(String(reqData.remaining_volunteers_needed).split("-").pop() || "0", 10) || 0);
        if (storedRemaining <= 0) {
          console.log("[AutoAssign] Team is already fully staffed (minimum requirement met).");
          return;
@@ -745,11 +766,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       await batch.commit();
       console.log(`[AutoAssign] Successfully assigned ${toAssign.length} volunteers. Leader: ${leaderName}`);
     } catch (firebaseErr: any) {
-      console.error("[AutoAssign] FATAL BATCH ERROR. Could not save assignments to database!", firebaseErr);
-      // Fallback: If strict permissions blocked the volunteer doc from being edited, 
-      // it halts everything. We must notify the developer.
-      alert(`Auto-Assign failed to save to database: ${firebaseErr.message}`);
-      return; // Stop execution if batch failed!
+      // Log the error clearly — never show alert() in production.
+      // Common cause: Firestore security rules. Fix is in firestore.rules (volunteer update rule).
+      console.error("[AutoAssign] Batch commit failed. Check Firestore security rules for /volunteers.", firebaseErr.message);
+      return;
     }
 
     // Notify assigned volunteers
@@ -798,13 +818,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const reqData = reqSnap.data();
 
     const currentlyAssigned = (reqData.assigned_volunteer_ids || []).length;
-    const parts = String(reqData.volunteers_needed || "1").replace("+", "").split("-");
-    const minNeeded = parseInt(parts[0], 10) || 1;
-    
+    // Prefer clean int fields; fall back to string parse for legacy docs.
+    const minNeeded = reqData.min_volunteers_needed
+      ?? (() => { const p = String(reqData.volunteers_needed || "1").replace("+","").split("-"); return parseInt(p[0],10)||1; })();
+
     let remaining = 0;
     if (reqData.remaining_volunteers_needed !== undefined && reqData.remaining_volunteers_needed !== null) {
-      const remainingStr = String(reqData.remaining_volunteers_needed).split("-").pop() || "0";
-      remaining = parseInt(remainingStr, 10) || 0;
+      remaining = typeof reqData.remaining_volunteers_needed === "number"
+        ? reqData.remaining_volunteers_needed
+        : (parseInt(String(reqData.remaining_volunteers_needed).split("-").pop()||"0",10)||0);
     } else {
       if (currentlyAssigned < minNeeded) remaining = minNeeded - currentlyAssigned;
     }
@@ -1008,8 +1030,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         const currentAssigned = (reqData.assigned_volunteer_ids || []).filter(
           (vid: string) => !timedOutVolIds.includes(vid)
         );
-        const parts = String(reqData.volunteers_needed || "1").replace("+", "").split("-");
-        const minNeeded = parseInt(parts[0], 10) || 1;
+        // Prefer clean int fields; fall back to string parse for legacy docs.
+        const minNeeded = reqData.min_volunteers_needed
+          ?? (() => { const p = String(reqData.volunteers_needed||"1").replace("+","").split("-"); return parseInt(p[0],10)||1; })();
         let newRemaining = 0;
         if (currentAssigned.length < minNeeded) {
            newRemaining = minNeeded - currentAssigned.length;
@@ -1080,6 +1103,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     });
     const nearbyNgoIds = nearbyNgos.map((n) => n.id);
 
+    // Parse volunteers_needed — supports "1", "2-5", "3+" formats
+    const vnRaw = String(data.volunteers_needed || "1").replace("+", "");
+    const vnParts = vnRaw.split("-").map((s: string) => parseInt(s.trim(), 10) || 1);
+    const minVol = vnParts[0];
+    const maxVol = vnParts.length > 1 ? vnParts[1] : vnParts[0];
+
     const docRef = await addDoc(collection(db, "emergency_requests"), {
       user_id: user!.uid,
       category: data.category,
@@ -1091,8 +1120,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       priority_score: ps,
       status: "Created",
       people_affected: data.people_affected ? parseInt(data.people_affected) || null : null,
-      volunteers_needed: data.volunteers_needed || 1,
-      remaining_volunteers_needed: data.volunteers_needed || 1,
+      volunteers_needed: data.volunteers_needed || 1,   // kept for display / legacy
+      min_volunteers_needed: minVol,
+      max_volunteers_needed: maxVol,
+      remaining_volunteers_needed: minVol,
       nearby_ngo_ids: nearbyNgoIds,
       participating_ngo_ids: [],
       assigned_volunteer_ids: [],
@@ -1157,6 +1188,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         ngo_id: ngo.id,
         ngo_name: ngo.ngoName,
         participating_ngo_ids: arrayUnion(ngo.id),
+        status_history: arrayUnion({ status: "Accepted", timestamp: new Date().toISOString(), actor: user?.uid }),
         updated_at: serverTimestamp(),
       });
       await createNotification(
@@ -1406,8 +1438,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       citizen_feedback: feedback || "",
       ratingByCitizen: rating || null,
       feedbackByCitizen: feedback || "",
-      rating: rating || null, // legacy support
       completed_at: approved ? new Date().toISOString() : null,
+      status_history: arrayUnion({ status, timestamp: new Date().toISOString(), actor: user?.uid }),
       updated_at: serverTimestamp(),
     });
 
@@ -1437,7 +1469,33 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
               const vData = (await transaction.get(vRef)).data();
               const currentPoints = pSnap.data()?.points || 0;
               const currentCompletions = vData?.completed_tasks || 0;
-              transaction.update(pRef, { points: currentPoints + 150 });
+
+              // \u2500\u2500 Trust score: weighted rolling average (0..5 scale) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+              const prevTrust = pSnap.data()?.trust_score ?? 4.5;
+              // Use citizen's rating if provided (0..5), else assume 4.5 for neutral
+              const ratingVal = typeof rating === "number" && rating > 0 ? Math.min(rating, 5) : 4.5;
+              const newTrustScore = Math.round((0.9 * prevTrust + 0.1 * ratingVal) * 100) / 100;
+
+              // \u2500\u2500 Streak tracking \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+              const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
+              const lastActivity = pSnap.data()?.last_activity_date || null;
+              const prevStreak = pSnap.data()?.streak_days || 0;
+              let newStreak = 1;
+              if (lastActivity) {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yStr = yesterday.toISOString().split("T")[0];
+                if (lastActivity === today) newStreak = prevStreak; // already credited today
+                else if (lastActivity === yStr) newStreak = prevStreak + 1; // consecutive
+                else newStreak = 1; // streak broken
+              }
+
+              transaction.update(pRef, {
+                points: currentPoints + 150,
+                trust_score: newTrustScore,
+                last_activity_date: today,
+                streak_days: newStreak,
+              });
               transaction.update(vRef, { completed_tasks: currentCompletions + 1, available: true, current_task_id: null });
             });
             await checkAndAwardBadges(uId);
@@ -1474,12 +1532,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const rateTask = useCallback(async (requestId: string, rating: number, feedback: string, userRole: string) => {
     const updateData: any = { updated_at: serverTimestamp() };
     if (userRole === "citizen") {
-      updateData.ratingByCitizen = rating;
+      updateData.ratingByCitizen  = rating;
       updateData.feedbackByCitizen = feedback;
-      updateData.rating = rating; // legacy
-      updateData.citizen_feedback = feedback; // legacy
     } else {
-      updateData.ratingByVolunteer = rating;
+      updateData.ratingByVolunteer  = rating;
       updateData.feedbackByVolunteer = feedback;
     }
     await updateDoc(doc(db, "emergency_requests", requestId), updateData);
@@ -1540,8 +1596,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, [ngos, user, createNotification]);
 
   const volunteerAdvance = useCallback(async (requestId: string, status: string) => {
-    await updateDoc(doc(db, "emergency_requests", requestId), { status, updated_at: serverTimestamp() });
-  }, []);
+    const actor = user?.uid || "unknown";
+    await updateDoc(doc(db, "emergency_requests", requestId), {
+      status,
+      updated_at: serverTimestamp(),
+      status_history: arrayUnion({ status, timestamp: new Date().toISOString(), actor }),
+    });
+  }, [user]);
 
   const approveVolunteer = useCallback(async (vId: string) => {
     const ngo = ngos.find((n) => n.userId === user?.uid);
@@ -1581,11 +1642,17 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (!profile || profile.role !== "volunteer" || !user) return;
     const vol = volunteers.find((v) => v.userId === user.uid);
     if (!vol) return;
-    await addDoc(collection(db, "emergency_requests", requestId, "assignments"), {
+    const assignRef = doc(collection(db, "emergency_requests", requestId, "assignments"), vol.id);
+    await setDoc(assignRef, {
       volunteer_id: vol.id,
       status: "assigned",
       is_leader: false,
       created_at: serverTimestamp(),
+    });
+    // Also update the request's assigned list so the volunteer appears in team tracking
+    await updateDoc(doc(db, "emergency_requests", requestId), {
+      assigned_volunteer_ids: arrayUnion(vol.id),
+      updated_at: serverTimestamp(),
     });
     await updateDoc(doc(db, "volunteers", vol.id), { current_task_id: requestId, available: false });
   }, [profile, user, volunteers]);

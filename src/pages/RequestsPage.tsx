@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAppData } from "../context/AppDataContext";
 import { getCategoryMeta, STATUS_COPY } from "../data/system";
@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { MapPin, Navigation, CheckCircle2, Play, UserCheck, Clock, MessageCircle, Phone, Car, Flag, TrendingUp, X } from "lucide-react";
+import { MapPin, Navigation, CheckCircle2, Play, UserCheck, Clock, MessageCircle, Phone, Car, Flag, TrendingUp, X, XCircle, Timer } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import CompletionFlow from "@/components/requests/CompletionFlow";
 import RatingModal from "@/components/requests/RatingModal";
@@ -27,6 +27,9 @@ export default function RequestsPage() {
   const [ratingRequest, setRatingRequest] = useState<string | null>(null);
   const [reportRequest, setReportRequest] = useState<string | null>(null);
   const [declinedRequests, setDeclinedRequests] = useState<Set<string>>(new Set());
+  // Live countdown timers per request (seconds remaining)
+  const [countdowns, setCountdowns] = useState<Record<string, number>>({});
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   if (!isAuthenticated) {
     return <Navigate to="/auth" replace />;
@@ -55,30 +58,36 @@ export default function RequestsPage() {
     ? Math.round((completedRequests.length / myRequests.length) * 100)
     : 0;
 
-  // 10-Minute Escalation Heartbeat
-  useEffect(() => {
-    if (role !== "citizen") return;
+  // NOTE: The 10-minute global escalation engine lives in AppDataContext.tsx
+  // (client-side Firestore transaction, race-condition safe across all open tabs).
+  // No duplicated logic needed here.
 
-    const interval = setInterval(() => {
-      activeRequests.forEach((req) => {
-        if (req.status === "Created" && req.createdAt) {
-          // If request is older than 10 mins and NGO hasn't accepted, force global escalation
-          const ageMs = Date.now() - new Date(req.createdAt).getTime();
-          if (ageMs > 10 * 60 * 1000) {
-            console.log(`Request ${req.id} escalated to global!`);
-            // The context method now accepts a boolean flag to ignore NGO requirement
-            // @ts-ignore
-            if (useAppData().autoAssignVolunteers) {
-               // @ts-ignore
-               useAppData().autoAssignVolunteers(req.id, true);
-            }
+  // Citizen cancel (only allowed before volunteers are dispatched)
+  const cancelRequest = useCallback(async (requestId: string) => {
+    await citizenFinalize(requestId, false, "Cancelled by citizen");
+  }, [citizenFinalize]);
+
+  // Tick countdown timers every second for pending assignments
+  useEffect(() => {
+    const WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+    const tick = () => {
+      const next: Record<string, number> = {};
+      const source = role === "volunteer" ? myAssignedRequests : [];
+      source.forEach((req: any) => {
+        if (req.status === "Volunteer assigned" || req.status === "Assigned") {
+          const assignedAt = req.last_assigned_at ? new Date(req.last_assigned_at).getTime() : null;
+          if (assignedAt) {
+            const remaining = Math.max(0, Math.round((assignedAt + WINDOW_MS - Date.now()) / 1000));
+            next[req.id] = remaining;
           }
         }
       });
-    }, 60000); // Check every minute
-
-    return () => clearInterval(interval);
-  }, [activeRequests, role]);
+      setCountdowns(next);
+    };
+    tick();
+    countdownRef.current = setInterval(tick, 1000);
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+  }, [myAssignedRequests, role]);
 
   const handleUploadProofs = async (requestId: string, urls: string[]) => {
     await updateDoc(doc(db, "emergency_requests", requestId), {
@@ -177,7 +186,7 @@ export default function RequestsPage() {
               )}
             </div>
 
-            {(req.status === "Completed" || req.status === "In Progress" || req.status === "In progress" || req.status === "Verification Pending") && (
+            {(req.status === "Completed" || req.status === "In Progress" || req.status === "Verification Pending") && (
               <CompletionFlow
                 requestId={req.id}
                 isVolunteer={isVolunteer && req.teamLeaderVolunteerId === userId}
@@ -216,7 +225,7 @@ export default function RequestsPage() {
                           <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with NGO
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => navigate(`/requests/${req.id}/chat/citizen-leader`)}>
-                          <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Loader
+                          <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat with Leader
                         </Button>
                         <Button size="sm" variant="outline" className="text-success" onClick={() => {
                           const vol = volunteers.find((v) => v.id === req.assignedVolunteerId);
@@ -225,6 +234,17 @@ export default function RequestsPage() {
                           <Phone className="w-3.5 h-3.5 mr-1" /> {t("chat.call")}
                         </Button>
                       </>
+                    )}
+                    {/* Cancel — only allowed when no volunteers have been dispatched yet */}
+                    {req.status === "Created" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-destructive border-destructive/20 hover:bg-destructive/10"
+                        onClick={() => cancelRequest(req.id)}
+                      >
+                        <XCircle className="w-3.5 h-3.5 mr-1" /> Cancel Request
+                      </Button>
                     )}
                     <Button size="sm" variant="ghost" className="text-destructive ml-auto" onClick={() => setReportRequest(req.id)}>
                       <Flag className="w-3.5 h-3.5" />
@@ -255,22 +275,31 @@ export default function RequestsPage() {
 
             {role === "volunteer" && req.status !== "Completed" && (
               <div className="flex flex-wrap gap-2 pt-1">
-                {req.status === "Volunteer assigned" || req.status === "Assigned" || req.status === "In Progress" || req.status === "In progress" ? (
+                {req.status === "Volunteer assigned" || req.status === "Assigned" || req.status === "In Progress" ? (
                    <>
                     {(req.status === "Volunteer assigned" || req.status === "Assigned") && (
-                      <Button size="sm" className="bg-success hover:bg-success/90" onClick={() => volunteerAdvance(req.id, "In Progress")}>
-                        <Play className="w-3.5 h-3.5 mr-1" /> Accept Task
-                      </Button>
-                    )}
-                    {(req.status === "Volunteer assigned" || req.status === "Assigned") && (
-                      <Button size="sm" variant="outline" className="text-destructive border-destructive/20" onClick={() => {
-                        setDeclinedRequests(prev => new Set(prev).add(req.id));
-                        rejectTask(req.id);
-                      }}>
-                        <AnimatePresence>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Countdown badge */}
+                        {countdowns[req.id] !== undefined && countdowns[req.id] > 0 && (
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                            countdowns[req.id] < 60
+                              ? "text-destructive border-destructive/30 bg-destructive/10 animate-pulse"
+                              : "text-warning border-warning/30 bg-warning/10"
+                          }`}>
+                            <Timer className="w-2.5 h-2.5" />
+                            {Math.floor(countdowns[req.id] / 60)}:{String(countdowns[req.id] % 60).padStart(2, "0")} left
+                          </span>
+                        )}
+                        <Button size="sm" className="bg-success hover:bg-success/90" onClick={() => volunteerAdvance(req.id, "In Progress")}>
+                          <Play className="w-3.5 h-3.5 mr-1" /> Accept Task
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-destructive border-destructive/20" onClick={() => {
+                          setDeclinedRequests(prev => new Set(prev).add(req.id));
+                          rejectTask(req.id);
+                        }}>
                           <X className="w-3.5 h-3.5 mr-1" /> Reject
-                        </AnimatePresence>
-                      </Button>
+                        </Button>
+                      </div>
                     )}
                     {req.location && (
                       <Button size="sm" variant="outline" asChild>
