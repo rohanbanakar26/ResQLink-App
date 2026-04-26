@@ -728,9 +728,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const totalAssignedNow = currentlyAssigned + toAssign.length;
     let nextRemainingVal = 0;
     if (totalAssignedNow < maxNeeded) {
-      nextRemainingVal = maxNeeded - totalAssignedNow;
+      nextRemainingVal = maxNeeded - totalAssignedNow; // fill up to max
     } else {
-      nextRemainingVal = 0; // Maximum requirement met, mark as fully staffed!
+      nextRemainingVal = 0; // max requirement met — fully staffed!
     }
 
     // Atomic Firestore write
@@ -830,6 +830,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     // Prefer clean int fields; fall back to string parse for legacy docs.
     const minNeeded = reqData.min_volunteers_needed
       ?? (() => { const p = String(reqData.volunteers_needed || "1").replace("+","").split("-"); return parseInt(p[0],10)||1; })();
+    const maxNeeded = reqData.max_volunteers_needed ?? minNeeded;
 
     let remaining = 0;
     if (reqData.remaining_volunteers_needed !== undefined && reqData.remaining_volunteers_needed !== null) {
@@ -837,7 +838,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         ? reqData.remaining_volunteers_needed
         : (parseInt(String(reqData.remaining_volunteers_needed).split("-").pop()||"0",10)||0);
     } else {
-      if (currentlyAssigned < minNeeded) remaining = minNeeded - currentlyAssigned;
+      if (currentlyAssigned < maxNeeded) remaining = maxNeeded - currentlyAssigned; // target max
     }
 
     if (remaining <= 0) {
@@ -1040,12 +1041,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
           (vid: string) => !timedOutVolIds.includes(vid)
         );
         // Prefer clean int fields; fall back to string parse for legacy docs.
-        const maxNeeded = reqData.max_volunteers_needed 
-          ?? reqData.min_volunteers_needed
+        const minNeeded = reqData.min_volunteers_needed
           ?? (() => { const p = String(reqData.volunteers_needed||"1").replace("+","").split("-"); return parseInt(p[0],10)||1; })();
+        const maxNeeded = reqData.max_volunteers_needed ?? minNeeded;
         let newRemaining = 0;
         if (currentAssigned.length < maxNeeded) {
-           newRemaining = maxNeeded - currentAssigned.length;
+           newRemaining = maxNeeded - currentAssigned.length; // fill up to max
         }
 
         let leaderUpdate: any = {};
@@ -1271,9 +1272,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     );
     const parts = String(reqData.volunteers_needed || "1").replace("+", "").split("-");
     const minNeeded = parseInt(parts[0], 10) || 1;
+    const maxNeeded = reqData.max_volunteers_needed ?? (parts.length > 1 ? parseInt(parts[1], 10) || minNeeded : minNeeded);
     let newRemaining = 0;
-    if (currentAssigned.length < minNeeded) {
-        newRemaining = minNeeded - currentAssigned.length;
+    if (currentAssigned.length < maxNeeded) {
+        newRemaining = maxNeeded - currentAssigned.length; // fill up to max
     }
 
     let leaderUpdate: any = {};
@@ -1640,14 +1642,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         if (aData.status !== "assigned") return false;
 
         const reqData = reqSnap.data();
-        const maxNeeded: number = reqData.max_volunteers_needed
-          ?? reqData.min_volunteers_needed
+        const minNeeded: number = reqData.min_volunteers_needed
           ?? (() => { const p = String(reqData.volunteers_needed || "1").replace("+", "").split("-"); return parseInt(p[0], 10) || 1; })();
+        // Gate against max — always try to fill the full team
+        const maxNeeded: number = reqData.max_volunteers_needed ?? minNeeded;
 
         // Atomic: count accepted slots via the accepted_volunteer_ids array field
         const acceptedIds: string[] = reqData.accepted_volunteer_ids || [];
         if (acceptedIds.length >= maxNeeded) {
-          // Slots full — mark this volunteer slot_taken
+          // Max slots full — mark this volunteer slot_taken
           tx.update(assignRef, { status: "slot_taken", slot_taken_at: new Date().toISOString() });
           tx.update(doc(db, "volunteers", vol.id), { available: true, current_task_id: null });
           return false;
