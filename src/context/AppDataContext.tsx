@@ -370,17 +370,51 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const unsubscribeNgos = onSnapshot(ngosRef, async (snapshot) => {
       if (snapshot.empty) { setNgos([]); setDataLoading(false); return; }
 
+      // Build basic NGO data from the ngos collection (always available — public)
+      const basicNgoData = snapshot.docs.map((d) => {
+        const n = d.data();
+        return {
+          id: d.id,
+          userId: n.user_id,
+          ngoName: n.ngo_name,
+          email: "",
+          phone: "",
+          services: n.services || [],
+          location: toGeo(n.location_lat, n.location_lng),
+          trustScore: 4.5,
+          capacity: n.capacity || 10,
+          followersCount: n.followers_count || 0,
+        };
+      });
+
+      // Profile enrichment (email, phone, trust score) requires auth.
+      // Skip silently if not yet logged in — avoids permission-denied errors
+      // on app load. The listener re-fires after login and enriches the data.
+      if (!auth.currentUser) {
+        setNgos(basicNgoData);
+        setDataLoading(false);
+        return;
+      }
+
       const userIds = snapshot.docs.map((d) => d.data().user_id).filter(Boolean);
       const chunks: string[][] = [];
       for (let i = 0; i < userIds.length; i += 30) chunks.push(userIds.slice(i, i + 30));
 
       const profileMap = new Map<string, any>();
-      await Promise.all(
-        chunks.map(async (chunk) => {
-          const pSnap = await getDocs(query(collection(db, "profiles"), where("__name__", "in", chunk)));
-          pSnap.docs.forEach((d) => profileMap.set(d.id, d.data()));
-        })
-      );
+      try {
+        await Promise.all(
+          chunks.map(async (chunk) => {
+            const pSnap = await getDocs(query(collection(db, "profiles"), where("__name__", "in", chunk)));
+            pSnap.docs.forEach((d) => profileMap.set(d.id, d.data()));
+          })
+        );
+      } catch (e) {
+        // If profile fetch fails (e.g. transient auth issue), still show NGOs
+        console.warn("[NGOs] Profile enrichment failed, showing basic NGO data.", e);
+        setNgos(basicNgoData);
+        setDataLoading(false);
+        return;
+      }
 
       const ngoData = snapshot.docs.map((d) => {
         const n = d.data();

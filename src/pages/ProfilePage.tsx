@@ -99,7 +99,7 @@ export default function ProfilePage() {
     fetchFollowers();
   }, [dialogOpen, currentUser, followingList, ngos, volunteers]);
 
-  if (loading) {
+  if (loading || (isAuthenticated && !currentUser)) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
         <Loader2 className="w-10 h-10 text-emergency animate-spin" />
@@ -110,28 +110,6 @@ export default function ProfilePage() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/auth" replace />;
-  }
-
-  if (!currentUser) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6 px-6 text-center">
-        <div className="w-20 h-20 rounded-full bg-muted/10 flex items-center justify-center border-2 border-dashed border-muted-foreground/30">
-          <User className="w-10 h-10 text-muted-foreground/30" />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-xl font-bold">Profile Not Found</h2>
-          <p className="text-sm text-muted-foreground max-w-xs">
-            We couldn't synchronize your secure profile. Please try signing out and registering a new account.
-          </p>
-        </div>
-        <Button onClick={logout} variant="outline" className="rounded-xl">
-          <LogOut className="w-4 h-4 mr-2" /> Sign Out
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 pb-32 space-y-8">

@@ -66,6 +66,19 @@ export default function EmergencyPage() {
     return <Navigate to="/auth" replace />;
   }
 
+  // Wait for profile to load before rendering role-specific UI.
+  // Without this, volunteers/NGOs briefly see the citizen form (role is null).
+  if (!currentUser) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
+        <Loader2 className="w-10 h-10 text-emergency animate-spin" />
+        <p className="text-sm font-medium text-muted-foreground animate-pulse tracking-widest uppercase">
+          Loading your dashboard…
+        </p>
+      </div>
+    );
+  }
+
   // Volunteer logic
   if (currentUser?.role === "volunteer") {
     const handleOnboardingComplete = () => {

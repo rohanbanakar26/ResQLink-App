@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ── Profile avatars ──
+    // Users can only upload/update their own avatar
+    match /avatars/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── Emergency proof uploads (photos/videos) ──
+    // Any authenticated user can upload proof for an emergency request
+    match /proofs/{requestId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 50 * 1024 * 1024  // max 50 MB
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType.matches('video/.*'));
+    }
+
+    // ── General uploads by authenticated users ──
+    // Catches any other upload paths used by the app
+    match /uploads/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId
+        && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    // ── Catch-all for authenticated users ──
+    // Ensures no upload path is accidentally blocked
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
