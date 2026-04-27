@@ -13,7 +13,8 @@ import t from "@/utils/i18n";
 function getProgressPercent(status: string): number {
   const map: Record<string, number> = {
     Created: 10, Requested: 10, Matching: 20, Accepted: 30,
-    "Volunteer assigned": 40, Assigned: 40, "In progress": 65, "In Progress": 65,
+    "Volunteer assigned": 40, Assigned: 40, "Awaiting more volunteers": 45,
+    "Team is ready": 85, "In progress": 65, "In Progress": 65,
     Completed: 100,
   };
   return map[status] ?? 15;

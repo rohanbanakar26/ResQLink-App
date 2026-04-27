@@ -48,7 +48,7 @@ function getStepIndex(status: string): number {
   if (status === "Awaiting more volunteers") return 3;
   // Once volunteers are assigned, all steps are complete
   if (status === "Volunteer assigned") return 5;
-  if (status === "On the way" || status === "In progress") return 5;
+  if (status === "On the way" || status === "In progress" || status === "In Progress" || status === "Team is ready") return 5;
   if (status === "Completed") return 5;
   // Default fallback for any unexpected intermediate state
   return 2;

@@ -22,7 +22,7 @@ export default function RequestsPage() {
   const {
     currentUser, isAuthenticated, location, requests, nearbyRequests,
     myRequests, volunteers, acceptRequest, assignVolunteer, volunteerAdvance, completeRequest,
-    rejectTask, citizenFinalize, myAssignedRequests, rateTask
+    rejectTask, citizenFinalize, myAssignedRequests, rateTask, myAssignmentStatuses
   } = useAppData();
   const [ratingRequest, setRatingRequest] = useState<string | null>(null);
   const [reportRequest, setReportRequest] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export default function RequestsPage() {
       const next: Record<string, number> = {};
       const source = role === "volunteer" ? myAssignedRequests : [];
       source.forEach((req: any) => {
-        if (req.status === "Volunteer assigned" || req.status === "Assigned") {
+        if (req.status === "Volunteer assigned" || req.status === "Assigned" || req.status === "Team is ready" || req.status === "In Progress") {
           const assignedAt = req.last_assigned_at ? new Date(req.last_assigned_at).getTime() : null;
           if (assignedAt) {
             const remaining = Math.max(0, Math.round((assignedAt + WINDOW_MS - Date.now()) / 1000));
@@ -272,9 +272,9 @@ export default function RequestsPage() {
 
             {role === "volunteer" && req.status !== "Completed" && (
               <div className="flex flex-wrap gap-2 pt-1">
-                {req.status === "Volunteer assigned" || req.status === "Assigned" || req.status === "In Progress" ? (
+                {req.status === "Volunteer assigned" || req.status === "Assigned" || req.status === "In Progress" || req.status === "Team is ready" ? (
                    <>
-                    {(req.status === "Volunteer assigned" || req.status === "Assigned") && (
+                    {myAssignmentStatuses[req.id] === "assigned" && (
                       <div className="flex flex-wrap items-center gap-2">
                         {/* Countdown badge */}
                         {countdowns[req.id] !== undefined && countdowns[req.id] > 0 && (
