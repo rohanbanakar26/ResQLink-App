@@ -60,9 +60,10 @@ export const SANITIZATION_TYPES = [
 ];
 
 export const VOLUNTEERS_NEEDED_OPTIONS = [
-  { id: "5", label: "5 volunteers" },
-  { id: "10", label: "10 volunteers" },
-  { id: "50", label: "50 volunteers" },
+  { id: "1-5", label: "1–5 volunteers" },
+  { id: "5-10", label: "5–10 volunteers" },
+  { id: "10-50", label: "10–50 volunteers" },
+  { id: "50-100", label: "50–100 volunteers" },
   { id: "100+", label: "100+ volunteers" },
 ];
 
@@ -107,7 +108,6 @@ export const REQUEST_STATUSES = [
   "Created",
   "Matching",
   "Assigned",
-  "Team is ready",
   "In Progress",
   "Verification Pending",
   "Completed",
@@ -119,7 +119,6 @@ export const STATUS_COPY: Record<string, string> = {
   Created: "Request created",
   Matching: "Finding help…",
   Assigned: "Volunteer assigned",
-  "Team is ready": "Team is ready ✓",
   "In Progress": "Help on the way",
   "Verification Pending": "Awaiting approval",
   "Completed": "Resolved ✓",
@@ -137,7 +136,6 @@ export const STATUS_COLORS: Record<string, string> = {
   Created: "bg-info/15 text-info border-info/30",
   Matching: "bg-warning/15 text-warning border-warning/30",
   Assigned: "bg-accent/15 text-accent border-accent/30",
-  "Team is ready": "bg-success/15 text-success border-success/30",
   "In Progress": "bg-info/15 text-info border-info/30",
   "Verification Pending": "bg-warning/15 text-warning border-warning/30",
   "Completed": "bg-success/15 text-success border-success/30",
